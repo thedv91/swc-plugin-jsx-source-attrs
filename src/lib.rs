@@ -4,7 +4,7 @@ pub mod path_utils;
 use config::PluginConfig;
 use path_utils::{extract_absolute_path, relativize_path, resolve_root_dir};
 use swc_core::{
-    common::{FileName, DUMMY_SP},
+    common::{FileName, SourceMapper, Span, DUMMY_SP},
     ecma::{
         ast::*,
         atoms::Atom,
@@ -51,12 +51,20 @@ pub struct JsxSourceAttrsVisitor {
     /// The path every element in this module reports. `None` when the host gave
     /// us no usable filename.
     source_path: Option<Str>,
+    /// Resolves a `BytePos` to line/column. Absent for native callers: the host
+    /// proxy only answers inside wasm.
+    source_map: Option<Box<dyn SourceMapper>>,
+    position: bool,
     /// Name bound to the enclosing function's props object, if any.
     current_props_name: Option<Atom>,
 }
 
 impl JsxSourceAttrsVisitor {
-    pub fn new(config: PluginConfig, filename: &FileName) -> Self {
+    pub fn new(
+        config: PluginConfig,
+        filename: &FileName,
+        source_map: Option<Box<dyn SourceMapper>>,
+    ) -> Self {
         let source_path = extract_absolute_path(filename)
             .map(|value| match config.root_dir.as_deref() {
                 Some(root_dir) => relativize_path(&value, root_dir),
@@ -71,8 +79,46 @@ impl JsxSourceAttrsVisitor {
         Self {
             attr_ident: IdentName::new(config.source_path_attr_name().into(), DUMMY_SP),
             source_path,
+            source_map,
+            position: config.position,
             current_props_name: None,
         }
+    }
+
+    fn attr_value(&self, span: Span) -> Option<Str> {
+        let source_path = self.source_path.as_ref()?;
+
+        if !self.position {
+            return Some(source_path.clone());
+        }
+
+        let Some(source_map) = self.source_map.as_ref() else {
+            // Native callers (the tests) have no host source map. Emit the bare
+            // path rather than dropping the attribute.
+            return Some(source_path.clone());
+        };
+
+        // This plugin runs after the other transforms, so the tree can contain
+        // elements the React Compiler synthesized, which carry no source span.
+        // Asking the host to resolve `BytePos(0)` panics with `NoFileFor`, and
+        // a wasm plugin cannot catch that — so check before asking.
+        if span.is_dummy() {
+            return Some(source_path.clone());
+        }
+
+        // A path that is not valid UTF-8 cannot be concatenated; keep it whole
+        // rather than losing the attribute over the suffix.
+        let Some(path) = source_path.value.as_str() else {
+            return Some(source_path.clone());
+        };
+
+        let loc = source_map.lookup_char_pos(span.lo);
+        Some(Str {
+            span: DUMMY_SP,
+            // `col_display` is 0-based; editors count columns from 1.
+            value: format!("{}:{}:{}", path, loc.line, loc.col_display + 1).into(),
+            raw: None,
+        })
     }
 
     fn should_annotate(&self, opening_element: &JSXOpeningElement) -> bool {
@@ -144,14 +190,14 @@ impl VisitMut for JsxSourceAttrsVisitor {
             return;
         }
 
-        let Some(source_path) = self.source_path.as_ref() else {
+        let Some(value) = self.attr_value(node.span) else {
             return;
         };
 
         node.attrs.push(JSXAttrOrSpread::JSXAttr(JSXAttr {
             span: DUMMY_SP,
             name: JSXAttrName::Ident(self.attr_ident.clone()),
-            value: Some(JSXAttrValue::Str(source_path.clone())),
+            value: Some(JSXAttrValue::Str(value)),
         }));
     }
 }
@@ -181,7 +227,8 @@ pub fn process_transform(
     let cwd = metadata.get_context(&TransformPluginMetadataContextKind::Cwd);
     config.root_dir = resolve_root_dir(config.root_dir.as_deref(), cwd.as_deref());
 
-    let mut visitor = JsxSourceAttrsVisitor::new(config, &filename);
+    let mut visitor =
+        JsxSourceAttrsVisitor::new(config, &filename, Some(Box::new(metadata.source_map)));
     program.visit_mut_with(&mut visitor);
     program
 }

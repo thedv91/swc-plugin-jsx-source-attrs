@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import {test} from "node:test";
 
-import {transform} from "./helpers.ts";
+import {reactCompiler, transform} from "./helpers.ts";
 
 const NESTED = `function GameModeNav() {
   return (
@@ -14,31 +14,43 @@ const NESTED = `function GameModeNav() {
   );
 }`;
 
-test("annotates every element with its source file", () => {
+test("annotates every element with file, line and column", () => {
   const code = transform(NESTED);
-  const file = "tests/e2e/Button.jsx";
 
-  for (const tag of ['"nav"', '"ul"', '"li"', "Item"]) {
+  // Columns are counted from 1, the way an editor reports them.
+  for (const [tag, position] of [
+    ['"nav"', "3:5"],
+    ['"ul"', "4:7"],
+    ['"li"', "5:9"],
+    ["Item", "5:13"],
+  ] as const) {
     assert.match(
       code,
       new RegExp(
-        `createElement\\(${tag}, \\{\\s+"data-source-path": "${file}"\\s*[,}]`
+        `createElement\\(${tag}, \\{\\s+"data-source-path": "tests/e2e/Button\\.jsx:${position}"\\s+\\}`
       )
     );
   }
 });
 
+test("drops the position when asked", () => {
+  const code = transform(NESTED, {position: false});
+
+  assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx"/);
+  assert.doesNotMatch(code, /Button\.jsx:\d/);
+});
+
 test("uses a custom attribute name", () => {
   const code = transform(NESTED, {"source-path-attr": "data-tsd-source"});
 
-  assert.match(code, /"data-tsd-source":/);
+  assert.match(code, /"data-tsd-source": "tests\/e2e\/Button\.jsx:3:5"/);
   assert.doesNotMatch(code, /data-source-path/);
 });
 
 test("uses a camelCase attribute name for React Native", () => {
   const code = transform(NESTED, {native: true});
 
-  assert.match(code, /dataSourcePath:/);
+  assert.match(code, /dataSourcePath: "tests\/e2e\/Button\.jsx:3:5"/);
 });
 
 test("skips fragments, which have no host node", () => {
@@ -78,6 +90,7 @@ function Unrelated() {
   // Of the three elements only <article /> is annotated: its spread is some
   // unrelated object, not the enclosing props.
   assert.equal((code.match(/data-source-path/g) ?? []).length, 1);
+  assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx:10:10"/);
 });
 
 test("does not overwrite an attribute already on the element", () => {
@@ -91,12 +104,16 @@ test("does not overwrite an attribute already on the element", () => {
 
   assert.match(code, /"data-source-path": "hand-written"/);
   assert.equal((code.match(/data-source-path/g) ?? []).length, 2);
+  assert.match(
+    code,
+    /"span", \{\s+"data-source-path": "tests\/e2e\/Button\.jsx:4:7"/
+  );
 });
 
 test("defaults the root to the working directory", () => {
   const code = transform(`function Button() { return <div />; }`);
 
-  assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx"/);
+  assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx:1:28"/);
 });
 
 test("anchors a relative root-dir to the working directory", () => {
@@ -109,7 +126,7 @@ test("anchors a relative root-dir to the working directory", () => {
 
   assert.match(
     code,
-    new RegExp(`"data-source-path": "${enclosing}/tests/e2e/Button\\.jsx"`)
+    new RegExp(`"data-source-path": "${enclosing}/tests/e2e/Button\\.jsx:1:28"`)
   );
 });
 
@@ -118,5 +135,16 @@ test("takes an absolute root-dir verbatim", () => {
     "root-dir": process.cwd(),
   });
 
+  assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx:1:28"/);
+});
+
+test("falls back to the bare path under the React Compiler", () => {
+  const code = transform(NESTED, {}, reactCompiler);
+
+  // The compiler rebuilds the JSX tree with no source spans, so there is no
+  // position left to report. Asking the host to resolve those spans would
+  // panic the build, so the plugin emits the path alone.
   assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx"/);
+  assert.doesNotMatch(code, /Button\.jsx:\d/);
+  assert.equal((code.match(/data-source-path/g) ?? []).length, 4);
 });

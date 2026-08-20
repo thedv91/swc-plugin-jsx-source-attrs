@@ -19,7 +19,7 @@ fn tr(config: PluginConfig, filename: FileName) -> impl Pass {
 
     (
         resolver(unresolved_mark, top_level_mark, false),
-        visit_mut_pass(JsxSourceAttrsVisitor::new(config, &filename)),
+        visit_mut_pass(JsxSourceAttrsVisitor::new(config, &filename, None)),
     )
 }
 
@@ -112,8 +112,13 @@ fn test_relativize_path() {
 
 #[test]
 fn test_config_parsing() {
+    // Position is on by default, and both entry points must agree on that
     let default_config = PluginConfig::default();
+    assert!(default_config.position);
     assert_eq!(default_config.source_path_attr_name(), "data-source-path");
+
+    let empty: PluginConfig = serde_json::from_str("{}").unwrap();
+    assert!(empty.position);
 
     let configured: PluginConfig =
         serde_json::from_str(r#"{ "source-path-attr": "data-tsd-source", "root-dir": "../.." }"#)
@@ -139,6 +144,9 @@ fn fixture(input: PathBuf) {
 
     let config = PluginConfig {
         root_dir: Some("/mock/root".to_string()),
+        // The fixtures run natively, where no host source map exists, so
+        // positions are covered by the e2e suite instead.
+        position: false,
         ..Default::default()
     };
 

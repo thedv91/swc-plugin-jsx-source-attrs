@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginConfig {
     /// Attribute name to emit (default: `data-source-path`)
     #[serde(default, rename = "source-path-attr")]
@@ -12,10 +12,31 @@ pub struct PluginConfig {
     #[serde(default, rename = "root-dir")]
     pub root_dir: Option<String>,
 
+    /// Append the element's own `:line:column` to the emitted path
+    #[serde(default = "enabled", rename = "position")]
+    pub position: bool,
+
     /// Use a camelCase attribute name for React Native, which rejects
     /// kebab-case props
     #[serde(default, rename = "native")]
     pub native: bool,
+}
+
+fn enabled() -> bool {
+    true
+}
+
+// Written out rather than derived so `PluginConfig::default()` and an empty
+// JSON config agree on `position`.
+impl Default for PluginConfig {
+    fn default() -> Self {
+        Self {
+            source_path_attr: None,
+            root_dir: None,
+            position: true,
+            native: false,
+        }
+    }
 }
 
 impl PluginConfig {

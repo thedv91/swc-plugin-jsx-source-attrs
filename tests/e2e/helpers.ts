@@ -32,3 +32,8 @@ export function transform(
 
   return transformSync(source, options).code;
 }
+
+/** SWC options that enable the automatic runtime + React Compiler. */
+export const reactCompiler: Pick<Options, "jsc"> = {
+  jsc: {transform: {react: {runtime: "automatic"}, reactCompiler: true}},
+};
