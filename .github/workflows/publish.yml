@@ -1,0 +1,67 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_RELEASE_LTO: "fat"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Must match the "Environment name" of the npm trusted publisher, and gates
+    # the job behind this environment's required reviewers.
+    environment: npm
+    permissions:
+      contents: read
+      # npm trusted publishing authenticates over OIDC instead of an NPM_TOKEN,
+      # which requires the job to be able to mint an id-token.
+      id-token: write
+    steps:
+      # https://github.com/actions/checkout
+      - uses: actions/checkout@v7
+
+      # https://github.com/pnpm/action-setup
+      - uses: pnpm/action-setup@v6
+
+      # https://github.com/actions/setup-node
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      # Trusted publishing landed in npm 11.5.1; the npm bundled with Node 24 may predate it.
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      # npm cannot unpublish a version after 72 hours, so refuse to release a
+      # tag that disagrees with the version actually being published.
+      - name: Verify tag matches package version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(node -p 'require("./package.json").version')"
+          if [ "$tag" != "$version" ]; then
+            echo "Release tag $GITHUB_REF_NAME does not match package.json version $version" >&2
+            exit 1
+          fi
+
+      - name: Install Node dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Rust
+        run: rustup show
+
+      - name: test
+        run: |
+          cargo test
+          node --run typecheck
+          node --run build
+          node --run test:e2e
+
+      # `prepack` rebuilds the wasm and copies it into the package root.
+      - name: publish
+        run: npm publish
