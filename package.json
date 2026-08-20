@@ -18,7 +18,8 @@
     "test": "cargo test",
     "typecheck": "tsc --noEmit",
     "test:e2e": "node --test tests/e2e/*.test.ts",
-    "prepack": "cp -rf target/wasm32-unknown-unknown/release/swc_plugin_jsx_source_attrs.wasm ."
+    "prepack": "pnpm build && cp -rf target/wasm32-unknown-unknown/release/swc_plugin_jsx_source_attrs.wasm .",
+    "release": "npm publish"
   },
   "main": "swc_plugin_jsx_source_attrs.wasm",
   "files": [
