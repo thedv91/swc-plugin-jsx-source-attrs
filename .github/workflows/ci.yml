@@ -1,13 +1,32 @@
 name: CI
 
+# Documentation carries no build or test signal, so a change confined to it
+# skips CI entirely. `paths-ignore` rather than `paths` so that anything new
+# and unlisted still gets built — the safe direction to be wrong in.
+#
+# This must be dropped if `build` ever becomes a required status check: a
+# skipped job reports nothing, and branch protection waits for it forever.
 on:
   push:
     branches:
       - main
+    paths-ignore: &docs
+      - "**/*.md"
+      - "**/*.txt"
+      - LICENSE
   pull_request:
+    paths-ignore: *docs
 
 permissions:
   contents: read
+
+# Superseded runs are cancelled on `main` too, not just on pull requests, since
+# that is where this repository is actually pushed. The cost is that a commit
+# pushed over quickly keeps no CI verdict of its own — acceptable while only the
+# tip is released from, but it does make a later bisect less informative.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_INCREMENTAL: 0
