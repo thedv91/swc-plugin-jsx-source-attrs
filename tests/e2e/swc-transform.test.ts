@@ -200,6 +200,41 @@ test("handles Turbopack's virtual project root", () => {
   assert.match(code, /"data-source-path": "src\/components\/Card\.tsx:1:26"/);
 });
 
+test("strips a relative root-dir from a project-relative path", () => {
+  // What Next.js 16.3 actually hands the plugin — no `[project]/` prefix, just
+  // the path measured from the workspace root
+  const code = transform(`function Card() { return <article />; }`, {
+    "root-dir": "apps/web",
+  }, {
+    filename: "apps/web/src/components/Card.tsx",
+  });
+
+  assert.match(code, /"data-source-path": "src\/components\/Card\.tsx:1:26"/);
+});
+
+test("strips a relative root-dir from a virtual path", () => {
+  // In a monorepo Turbopack roots the project at the repo, so a package build
+  // reports `[project]/apps/web/…`. A relative root-dir is the only form that
+  // can drop the workspace prefix — the absolute one names a location the
+  // virtual path never reveals.
+  const code = transform(`function Card() { return <article />; }`, {
+    "root-dir": "apps/web",
+  }, {
+    filename: "[project]/apps/web/src/components/Card.tsx",
+  });
+
+  assert.match(code, /"data-source-path": "src\/components\/Card\.tsx:1:26"/);
+
+  // And a sibling package is outside that root, so it is not project source
+  const sibling = transform(`function Card() { return <article />; }`, {
+    "root-dir": "apps/web",
+  }, {
+    filename: "[project]/packages/ui/src/Card.tsx",
+  });
+
+  assert.doesNotMatch(sibling, /data-source-path/);
+});
+
 test("skips dependencies and bundler code behind a virtual root", () => {
   const dependency = transform(`function L() { return <span />; }`, {}, {
     filename: "[project]/node_modules/some-lib/index.js",

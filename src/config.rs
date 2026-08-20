@@ -12,6 +12,15 @@ pub struct PluginConfig {
     #[serde(default, rename = "root-dir")]
     pub root_dir: Option<String>,
 
+    /// The same `root-dir` in the form a path the host already made
+    /// project-relative can be measured against. Derived from `root-dir`, never
+    /// configured on its own: `root_dir` is overwritten with its absolute
+    /// resolution before the visitor runs, and an absolute root cannot be
+    /// matched against a path that names no filesystem location, so the
+    /// relative form has to be kept separately.
+    #[serde(skip)]
+    pub relative_root_dir: Option<String>,
+
     /// Append the element's own `:line:column` to the emitted path
     #[serde(default = "enabled", rename = "position")]
     pub position: bool,
@@ -33,6 +42,7 @@ impl Default for PluginConfig {
         Self {
             source_path_attr: None,
             root_dir: None,
+            relative_root_dir: None,
             position: true,
             native: false,
         }

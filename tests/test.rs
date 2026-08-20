@@ -28,6 +28,10 @@ fn test_project_relative_path() {
     use swc_plugin_jsx_source_attrs::path_utils::project_relative_path;
 
     let root = Some("/home/me/app");
+    // Every case below is a filesystem path, where the Turbopack form of the
+    // root has no say; it gets its own test.
+    let project_relative_path =
+        |path: &str, root_dir: Option<&str>| project_relative_path(path, root_dir, None);
 
     // Root dir with and without a trailing separator
     assert_eq!(
@@ -87,7 +91,7 @@ fn test_project_relative_path() {
     );
 
     // Turbopack addresses modules through a virtual root instead of the
-    // filesystem, and `root-dir` has no bearing on those
+    // filesystem, so the resolved absolute `root-dir` has no bearing on those
     assert_eq!(
         project_relative_path("[project]/src/Button.tsx", root),
         Some("src/Button.tsx".to_string())
@@ -121,6 +125,121 @@ fn test_project_relative_path() {
     assert_eq!(
         project_relative_path("/home/me/app/src/Button.tsx", Some("")),
         Some("/home/me/app/src/Button.tsx".to_string())
+    );
+}
+
+#[test]
+fn test_relative_root_dir() {
+    use swc_plugin_jsx_source_attrs::path_utils::relative_root_dir;
+
+    // A root inside the project is the one form a `[project]/…` path can be
+    // measured against
+    assert_eq!(
+        relative_root_dir(Some("apps/web")),
+        Some("apps/web".to_string())
+    );
+    assert_eq!(
+        relative_root_dir(Some("./apps/web/")),
+        Some("apps/web".to_string())
+    );
+    assert_eq!(
+        relative_root_dir(Some("apps\\web")),
+        Some("apps/web".to_string())
+    );
+
+    // The project root itself narrows nothing, which an empty root already means
+    assert_eq!(relative_root_dir(Some(".")), Some("".to_string()));
+
+    // An absolute root names a location the virtual path never reveals, and a
+    // root above the project root cannot contain a `[project]/…` path at all
+    assert_eq!(relative_root_dir(Some("/repo/apps/web")), None);
+    assert_eq!(relative_root_dir(Some("C:/repo")), None);
+    assert_eq!(relative_root_dir(Some("../..")), None);
+    assert_eq!(relative_root_dir(Some("apps/../..")), None);
+    assert_eq!(relative_root_dir(None), None);
+
+    // A directory that merely starts with two dots is an ordinary segment
+    assert_eq!(
+        relative_root_dir(Some("..hidden/web")),
+        Some("..hidden/web".to_string())
+    );
+}
+
+#[test]
+fn test_project_relative_path_from_a_bundler() {
+    use swc_plugin_jsx_source_attrs::path_utils::project_relative_path;
+
+    // Next.js 16.3 hands over a plain project-relative path rather than the
+    // `[project]/…` form Turbopack's docs describe, and both must take the root
+    // the same way — annotating only the virtual form left `root-dir` inert on
+    // the one shape Next.js actually produces
+    assert_eq!(
+        project_relative_path(
+            "apps/web/src/Button.tsx",
+            Some("/repo/apps/web"),
+            Some("apps/web")
+        ),
+        Some("src/Button.tsx".to_string())
+    );
+    assert_eq!(
+        project_relative_path("packages/ui/src/Button.tsx", None, Some("apps/web")),
+        None
+    );
+
+    // In a monorepo Turbopack roots the project at the repo, so a package build
+    // reports every file through the workspace prefix. A relative `root-dir`
+    // drops it — this is the only thing that can, the absolute one alongside it
+    // being unmatchable here
+    assert_eq!(
+        project_relative_path(
+            "[project]/apps/web/src/Button.tsx",
+            Some("/repo/apps/web"),
+            Some("apps/web")
+        ),
+        Some("src/Button.tsx".to_string())
+    );
+
+    // A sibling package is outside the configured root, so it is not project
+    // source — the same rule the filesystem branch applies
+    assert_eq!(
+        project_relative_path(
+            "[project]/packages/ui/src/Button.tsx",
+            None,
+            Some("apps/web")
+        ),
+        None
+    );
+
+    // ...and a partial directory-name match is not the root either
+    assert_eq!(
+        project_relative_path(
+            "[project]/apps/website/src/Button.tsx",
+            None,
+            Some("apps/web")
+        ),
+        None
+    );
+
+    // A dependency stays skipped however the root is stated
+    assert_eq!(
+        project_relative_path(
+            "[project]/apps/web/node_modules/lib/index.js",
+            None,
+            Some("apps/web")
+        ),
+        None
+    );
+
+    // An empty root — what `root-dir: "."` resolves to — filters nothing
+    assert_eq!(
+        project_relative_path("[project]/apps/web/src/Button.tsx", None, Some("")),
+        Some("apps/web/src/Button.tsx".to_string())
+    );
+
+    // Other virtual roots are the bundler's own code, root or no root
+    assert_eq!(
+        project_relative_path("[next]/dist/client/app.js", None, Some("apps/web")),
+        None
     );
 }
 

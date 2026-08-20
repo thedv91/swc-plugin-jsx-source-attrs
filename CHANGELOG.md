@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.3.0 (2026-08-20)
+
+### Fixed
+
+- **`root-dir` still did nothing on Next.js 16.3**, which is what 1.2.0 set out to fix. That release taught the plugin to strip a relative root from Turbopack's `[project]/…` paths — but Next.js does not hand over that shape. It passes the plain `apps/web/src/App.tsx`, which took a different branch: already project-relative, so returned untouched, `root-dir` unread.
+
+  Both shapes are the same thing — a path measured from the project root — and both now take the root the same way. Verified against a running `next dev` on 16.3, not just a synthetic filename.
+
+### Changed
+
+- A **relative** `root-dir` now narrows a relative path from any host, where before such a path was always passed through whole. If yours points at a directory the host's paths are not measured from, files outside it lose the attribute. An absolute `root-dir` is unaffected.
+- `path_utils::virtual_root_dir` is now `relative_root_dir`, and `PluginConfig::virtual_root_dir` likewise — the value was never specific to virtual paths. Rust API only; the plugin config is unchanged.
+
+## 1.2.0 (2026-08-20)
+
+### Added
+
+- **`root-dir` now applies under Turbopack**, where it had no effect at all. In a monorepo Turbopack roots the project at the repo, not at the package being built, so a package build reported every file through its workspace prefix — `apps/web/src/Button.tsx` — with no way to shorten it.
+
+  A **relative** `root-dir` is now stripped from a `[project]/…` path as well:
+
+  ```jsonc
+  ["swc-plugin-jsx-source-attrs", {"root-dir": "apps/web"}]
+  // [project]/apps/web/src/Button.tsx → src/Button.tsx
+  ```
+
+  An absolute `root-dir` still cannot apply here: a virtual path never reveals the filesystem location to measure it against. Nor can `../..`, which points above the project root, where no `[project]/…` path can live. Both are ignored under Turbopack, as before.
+
+  The usual consequence of a root follows: a file outside it is not project source and gets **no attribute**. With `root-dir: "apps/web"`, a component imported from `packages/ui` is no longer annotated — its call site in `apps/web` still is, which is the element you want when you click through.
+
 ## 1.1.2 (2026-08-20)
 
 ### Fixed

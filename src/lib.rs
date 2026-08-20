@@ -2,7 +2,9 @@ pub mod config;
 pub mod path_utils;
 
 use config::PluginConfig;
-use path_utils::{extract_absolute_path, project_relative_path, resolve_root_dir};
+use path_utils::{
+    extract_absolute_path, project_relative_path, relative_root_dir, resolve_root_dir,
+};
 use swc_core::{
     common::{FileName, SourceMapper, Span, DUMMY_SP},
     ecma::{
@@ -47,7 +49,13 @@ impl JsxSourceAttrsVisitor {
         source_map: Option<Box<dyn SourceMapper>>,
     ) -> Self {
         let source_path = extract_absolute_path(filename)
-            .and_then(|value| project_relative_path(&value, config.root_dir.as_deref()))
+            .and_then(|value| {
+                project_relative_path(
+                    &value,
+                    config.root_dir.as_deref(),
+                    config.relative_root_dir.as_deref(),
+                )
+            })
             .map(|value| Str {
                 span: DUMMY_SP,
                 value: value.into(),
@@ -176,10 +184,21 @@ pub fn process_transform(
     // `root-dir` is resolved against, so it has to be read from the host here
     // rather than inside the visitor.
     let cwd = metadata.get_context(&TransformPluginMetadataContextKind::Cwd);
+    // Derived before `root_dir` is overwritten with its absolute resolution —
+    // the Turbopack form needs the value as it was written.
+    config.relative_root_dir = relative_root_dir(config.root_dir.as_deref());
     config.root_dir = resolve_root_dir(config.root_dir.as_deref(), cwd.as_deref());
 
     let mut visitor =
         JsxSourceAttrsVisitor::new(config, &filename, Some(Box::new(metadata.source_map)));
+
+    // Without a path there is no attribute to emit, so the walk would visit
+    // every node only to bail on each one. Dev builds hand the plugin plenty of
+    // such modules — dependencies, and the bundler's own virtual roots.
+    if visitor.source_path.is_none() {
+        return program;
+    }
+
     program.visit_mut_with(&mut visitor);
     program
 }

@@ -95,14 +95,66 @@ pub fn resolve_root_dir(root_dir: Option<&str>, cwd: Option<&str>) -> Option<Str
     }
 }
 
+/// The `root-dir` a path that is *already* project-relative can be measured
+/// against, or `None` when the configured value has no meaning in that space.
+///
+/// A bundler need not hand plugins filesystem paths. Turbopack addresses
+/// modules as `[project]/…`, and Next.js 16.3 hands over the plain
+/// `apps/web/src/App.tsx`; either way what arrives is measured from the project
+/// root, not from the disk. The only root that can be stripped from such a path
+/// is one expressed the same way — relative, and inside the project. An
+/// absolute root names a filesystem location the path never reveals, and a
+/// leading `..` climbs above the project root, where no such path can live.
+pub fn relative_root_dir(root_dir: Option<&str>) -> Option<String> {
+    let root_dir = normalize_separators(root_dir?);
+    if is_absolute(&root_dir) {
+        return None;
+    }
+
+    let root_dir = normalize_dots(&root_dir);
+    if root_dir == ".." || root_dir.starts_with("../") {
+        return None;
+    }
+
+    Some(root_dir)
+}
+
 fn is_inside_dependencies(path: &str) -> bool {
     path.split('/').any(|segment| segment == "node_modules")
+}
+
+/// Strip `root_dir` from the front of `path`, or `None` when `path` is outside
+/// it. An empty root strips nothing and filters nothing.
+fn strip_root_prefix<'a>(path: &'a str, root_dir: &str) -> Option<&'a str> {
+    let root_dir = root_dir.trim_end_matches('/');
+    if root_dir.is_empty() {
+        return Some(path);
+    }
+
+    // Only a separator marks a real directory boundary: `/app` must not match
+    // `/apps/web/Button.tsx` and eat the `s`.
+    let stripped = path.strip_prefix(root_dir)?;
+    if !stripped.starts_with('/') {
+        return None;
+    }
+    Some(stripped.trim_start_matches('/'))
 }
 
 /// Turbopack does not hand plugins filesystem paths. It addresses every module
 /// through a virtual root: `[project]/src/App.tsx` for your own source, and
 /// `[next]/…`, `[externals]/…` and friends for what the bundler injects.
 const TURBOPACK_PROJECT_ROOT: &str = "[project]/";
+
+/// Finish an already-project-relative `path`: narrow it to `root_dir` when one
+/// applies, then drop it if what remains is a dependency.
+fn narrowed_to_project(path: &str, root_dir: Option<&str>) -> Option<String> {
+    let path = match root_dir {
+        Some(root_dir) => strip_root_prefix(path, root_dir)?,
+        None => path,
+    };
+
+    (!is_inside_dependencies(path)).then(|| path.to_string())
+}
 
 /// Make `path` relative to `root_dir`, or return `None` when the file is not
 /// part of the project — outside the root, or inside a dependency.
@@ -115,13 +167,21 @@ const TURBOPACK_PROJECT_ROOT: &str = "[project]/";
 /// Both sides are normalized to `/` before comparing, so a Windows-style
 /// `root-dir` still matches the host-supplied filename and the emitted value
 /// is identical on every platform.
-pub fn project_relative_path(path: &str, root_dir: Option<&str>) -> Option<String> {
+///
+/// `relative_root_dir` is the same `root-dir` in the form a project-relative
+/// path can be measured against — see [`relative_root_dir`], which produces it.
+pub fn project_relative_path(
+    path: &str,
+    root_dir: Option<&str>,
+    relative_root_dir: Option<&str>,
+) -> Option<String> {
     let path = normalize_separators(path);
 
-    // Under Turbopack the path is already project-relative once its virtual
-    // root is removed, and `root-dir` has nothing to say about it.
+    // Under Turbopack the path is project-relative once its virtual root is
+    // removed, so the resolved absolute `root-dir` cannot apply — only a root
+    // stated relative to the project root can narrow it further.
     if let Some(relative) = path.strip_prefix(TURBOPACK_PROJECT_ROOT) {
-        return (!is_inside_dependencies(relative)).then(|| relative.to_string());
+        return narrowed_to_project(relative, relative_root_dir);
     }
 
     // Any other virtual root is the bundler's own code, not the project's.
@@ -129,10 +189,13 @@ pub fn project_relative_path(path: &str, root_dir: Option<&str>) -> Option<Strin
         return None;
     }
 
-    // A host that hands us a relative path has already made it relative to the
-    // project; measuring it against an absolute root would only reject it.
+    // A host that hands us a relative path has already measured it from the
+    // project root — Next.js 16.3 hands over `apps/web/src/App.tsx` rather than
+    // the `[project]/…` form its docs describe. So this is the same space as
+    // the branch above, and takes the same root: the absolute one cannot apply
+    // here either, and measuring against it would only reject the file.
     if !is_absolute(&path) {
-        return (!is_inside_dependencies(&path)).then(|| path.into_owned());
+        return narrowed_to_project(&path, relative_root_dir);
     }
 
     let Some(root_dir) = root_dir else {
@@ -142,19 +205,7 @@ pub fn project_relative_path(path: &str, root_dir: Option<&str>) -> Option<Strin
     };
 
     let root_dir = normalize_separators(root_dir);
-    let root_dir = root_dir.trim_end_matches('/');
-
-    let relative = if root_dir.is_empty() {
-        path.as_ref()
-    } else {
-        // Only a separator marks a real directory boundary: `/app` must not
-        // match `/apps/web/Button.tsx` and eat the `s`.
-        let stripped = path.strip_prefix(root_dir)?;
-        if !stripped.starts_with('/') {
-            return None;
-        }
-        stripped.trim_start_matches('/')
-    };
+    let relative = strip_root_prefix(&path, &root_dir)?;
 
     (!is_inside_dependencies(relative)).then(|| relative.to_string())
 }

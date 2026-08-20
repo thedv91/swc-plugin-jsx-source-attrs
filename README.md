@@ -52,6 +52,8 @@ This is a development tool. It puts an attribute on every element and inflates t
 
   A **relative** value is anchored to the working directory. Prefer this over an absolute path: an absolute root is tied to one machine, and on CI or in Docker it silently stops matching, at which point the attribute falls back to the full build-machine path.
 
+  Under **Turbopack** only a relative value has any effect. What the plugin receives there is a path already measured from the project root — `apps/web/src/Button.tsx`, or the virtual `[project]/apps/web/src/Button.tsx`, depending on the host — so `root-dir: apps/web` is stripped from it as you would expect, while an absolute root has no filesystem location to match against and is ignored. So is `../..`, which points above the project root.
+
   Windows separators are normalized to `/` on both sides, so the emitted value is identical on every platform. A file **outside** `root-dir` is not project source and gets no attribute at all — see below.
 
 ## Monorepos
@@ -66,6 +68,10 @@ Which form you get is decided by the working directory the build runs in, not by
 | repo root | `apps/web` | `src/components/Button.tsx:3:5` |
 
 Repo-root-relative paths cost a few characters but stay unambiguous: two apps that both have `src/components/Button.tsx` are otherwise indistinguishable.
+
+Under Turbopack the working directory drops out of it entirely — Turbopack roots the project at the repo (that is where the lockfile is), so a package build always reports `apps/web/src/components/Button.tsx` unless you set `root-dir: apps/web`, the one form that reaches a path the host has already made project-relative.
+
+Either way, narrowing the root narrows what gets annotated: with `root-dir: apps/web`, a component that lives in `packages/ui` is outside the project and gets nothing. Its call site inside `apps/web` is still annotated, which is the element the browser finds first — the same trade the `node_modules` rule below makes.
 
 ## Project files only
 
