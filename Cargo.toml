@@ -1,0 +1,39 @@
+[package]
+authors     = ["Harry <thedv91@gmail.com>"]
+description = "[SWC plugin] Annotate every JSX element with the source file, line and column it was written at"
+edition     = "2021"
+homepage    = "https://github.com/thedv91/swc-plugin-jsx-source-attrs"
+keywords    = ["swc-plugin", "swc", "react", "jsx", "devtools"]
+license     = "MIT"
+name        = "swc-plugin-jsx-source-attrs"
+readme      = "README.md"
+repository  = "https://github.com/thedv91/swc-plugin-jsx-source-attrs"
+version     = "1.0.0"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+serde = { version = "1.0.225", features = ["derive"], default-features = false }
+serde_json = { version = "1.0.145", default-features = false }
+# Pinned to the swc_core ABI embedded in @rspack/core 2.1.x.
+swc_core = { version = "=71.0.1", features = ["ecma_plugin_transform"] }
+
+[dev-dependencies]
+testing = "24.0.1"
+swc_core = { version = "=71.0.1", features = ["ecma_plugin_transform", "ecma_parser", "swc_ecma_transforms_testing"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+# Optimize for size
+opt-level = "z"
+# Strip debug symbols
+strip = "symbols"
+
+[profile.dev]
+incremental = true
+debug = 1
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(swc_ast_unknown)"] }
