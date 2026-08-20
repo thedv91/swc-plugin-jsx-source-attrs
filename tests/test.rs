@@ -24,6 +24,76 @@ fn tr(config: PluginConfig, filename: FileName) -> impl Pass {
 }
 
 #[test]
+fn test_project_relative_path() {
+    use swc_plugin_jsx_source_attrs::path_utils::project_relative_path;
+
+    let root = Some("/home/me/app");
+
+    // Root dir with and without a trailing separator
+    assert_eq!(
+        project_relative_path("/home/me/app/src/Button.tsx", root),
+        Some("src/Button.tsx".to_string())
+    );
+    assert_eq!(
+        project_relative_path("/home/me/app/src/Button.tsx", Some("/home/me/app/")),
+        Some("src/Button.tsx".to_string())
+    );
+
+    // A partial directory-name match is not the project: `/home/me/app` must
+    // not swallow the `s` of `apps`
+    assert_eq!(
+        project_relative_path("/home/me/apps/web/Button.tsx", root),
+        None
+    );
+
+    // Outside the root is outside the project
+    assert_eq!(project_relative_path("/var/tmp/Button.tsx", root), None);
+
+    // A dependency's own source is not project source, however it is reached
+    assert_eq!(
+        project_relative_path("/home/me/app/node_modules/some-lib/dist/index.js", root),
+        None
+    );
+    assert_eq!(
+        project_relative_path(
+            "/home/me/app/node_modules/.pnpm/some-lib@1.0.0/node_modules/some-lib/index.js",
+            root
+        ),
+        None
+    );
+    // ...and with no root configured the dependency check still applies
+    assert_eq!(
+        project_relative_path("/anywhere/node_modules/lib/index.js", None),
+        None
+    );
+    assert_eq!(
+        project_relative_path("/anywhere/src/Button.tsx", None),
+        Some("/anywhere/src/Button.tsx".to_string())
+    );
+
+    // A directory merely containing the word is still project source
+    assert_eq!(
+        project_relative_path("/home/me/app/src/node_modules_shim/Button.tsx", root),
+        Some("src/node_modules_shim/Button.tsx".to_string())
+    );
+
+    // Windows separators are normalized on both sides
+    assert_eq!(
+        project_relative_path(
+            "C:\\Users\\Name\\project\\src\\Button.tsx",
+            Some("C:/Users/Name/project")
+        ),
+        Some("src/Button.tsx".to_string())
+    );
+
+    // An empty root dir filters nothing
+    assert_eq!(
+        project_relative_path("/home/me/app/src/Button.tsx", Some("")),
+        Some("/home/me/app/src/Button.tsx".to_string())
+    );
+}
+
+#[test]
 fn test_resolve_root_dir() {
     use swc_plugin_jsx_source_attrs::path_utils::resolve_root_dir;
 
@@ -75,42 +145,6 @@ fn test_resolve_root_dir() {
 }
 
 #[test]
-fn test_relativize_path() {
-    use swc_plugin_jsx_source_attrs::path_utils::relativize_path;
-
-    // Root dir with and without a trailing separator
-    assert_eq!(
-        relativize_path("/home/me/app/src/Button.tsx", "/home/me/app"),
-        "src/Button.tsx"
-    );
-    assert_eq!(
-        relativize_path("/home/me/app/src/Button.tsx", "/home/me/app/"),
-        "src/Button.tsx"
-    );
-
-    // A partial directory-name match must not be stripped
-    assert_eq!(
-        relativize_path("/home/me/apps/web/Button.tsx", "/home/me/app"),
-        "/home/me/apps/web/Button.tsx"
-    );
-
-    // Windows separators are normalized on both sides
-    assert_eq!(
-        relativize_path(
-            "C:\\Users\\Name\\project\\src\\Button.tsx",
-            "C:/Users/Name/project"
-        ),
-        "src/Button.tsx"
-    );
-
-    // An empty root dir is a no-op
-    assert_eq!(
-        relativize_path("/home/me/app/src/Button.tsx", ""),
-        "/home/me/app/src/Button.tsx"
-    );
-}
-
-#[test]
 fn test_config_parsing() {
     // Position is on by default, and both entry points must agree on that
     let default_config = PluginConfig::default();
@@ -120,11 +154,17 @@ fn test_config_parsing() {
     let empty: PluginConfig = serde_json::from_str("{}").unwrap();
     assert!(empty.position);
 
-    let configured: PluginConfig =
-        serde_json::from_str(r#"{ "source-path-attr": "data-tsd-source", "root-dir": "../.." }"#)
-            .unwrap();
+    let configured: PluginConfig = serde_json::from_str(
+        r#"{
+        "source-path-attr": "data-tsd-source",
+        "root-dir": "../..",
+        "position": false
+    }"#,
+    )
+    .unwrap();
     assert_eq!(configured.source_path_attr_name(), "data-tsd-source");
     assert_eq!(configured.root_dir, Some("../..".to_string()));
+    assert!(!configured.position);
 
     // React Native rejects kebab-case props
     let native: PluginConfig = serde_json::from_str(r#"{ "native": true }"#).unwrap();
@@ -150,7 +190,12 @@ fn fixture(input: PathBuf) {
         ..Default::default()
     };
 
-    let filename = FileName::Custom(format!("/mock/root/src/{}.jsx", case));
+    // Cases prefixed `dependency_` stand in for a file the bundler pulled out
+    // of node_modules; everything else is project source.
+    let filename = FileName::Custom(match case.strip_prefix("dependency_") {
+        Some(rest) => format!("/mock/root/node_modules/some-lib/dist/{}.js", rest),
+        None => format!("/mock/root/src/{}.jsx", case),
+    });
 
     test_fixture(
         Syntax::Es(EsSyntax {

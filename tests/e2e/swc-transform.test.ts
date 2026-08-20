@@ -148,3 +148,40 @@ test("falls back to the bare path under the React Compiler", () => {
   assert.doesNotMatch(code, /Button\.jsx:\d/);
   assert.equal((code.match(/data-source-path/g) ?? []).length, 4);
 });
+
+test("annotates nothing when the file sits outside root-dir", () => {
+  const code = transform(`function Button() { return <div />; }`, {
+    "root-dir": "/somewhere/else",
+  });
+
+  // Not project source, so there is no project-relative position to report.
+  assert.doesNotMatch(code, /data-source-path/);
+});
+
+test("annotates nothing inside a dependency", () => {
+  const code = transform(
+    `export function Button(props) {
+  return <button className="lib-button" {...props} />;
+}
+
+export function Card({title}) {
+  return <div className="lib-card"><h2>{title}</h2></div>;
+}`,
+    {},
+    {filename: "node_modules/some-lib/dist/index.js"}
+  );
+
+  assert.doesNotMatch(code, /data-source-path/);
+});
+
+test("annotates a library component at the call site in project code", () => {
+  const code = transform(`import {Button} from "some-lib";
+
+function App() {
+  return <Button label="hi" />;
+}`);
+
+  // What you want when you click a library component is the line in your own
+  // code that rendered it — which is exactly where this element sits.
+  assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx:4:10"/);
+});

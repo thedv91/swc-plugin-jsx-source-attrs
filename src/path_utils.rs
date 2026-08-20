@@ -95,27 +95,46 @@ pub fn resolve_root_dir(root_dir: Option<&str>, cwd: Option<&str>) -> Option<Str
     }
 }
 
-/// Strip `root_dir` from `path` so the emitted value is root-relative.
+fn is_inside_dependencies(path: &str) -> bool {
+    path.split('/').any(|segment| segment == "node_modules")
+}
+
+/// Make `path` relative to `root_dir`, or return `None` when the file is not
+/// part of the project — outside the root, or inside a dependency.
+///
+/// A library's own internals are not project source, and annotating them helps
+/// nobody: clicking a library component should land on the line in *your* code
+/// that rendered it, and that call site lives in a project file, which is
+/// annotated normally.
 ///
 /// Both sides are normalized to `/` before comparing, so a Windows-style
 /// `root-dir` still matches the host-supplied filename and the emitted value
-/// is identical on every platform. A path outside `root_dir` is left as-is
-/// rather than mangled.
-pub fn relativize_path(path: &str, root_dir: &str) -> String {
+/// is identical on every platform.
+pub fn project_relative_path(path: &str, root_dir: Option<&str>) -> Option<String> {
     let path = normalize_separators(path);
+
+    let Some(root_dir) = root_dir else {
+        // With no root there is nothing to measure "inside the project"
+        // against, so only the dependency check can apply.
+        return (!is_inside_dependencies(&path)).then(|| path.into_owned());
+    };
+
     let root_dir = normalize_separators(root_dir);
     let root_dir = root_dir.trim_end_matches('/');
 
-    if root_dir.is_empty() {
-        return path.into_owned();
-    }
-
-    match path.strip_prefix(root_dir) {
+    let relative = if root_dir.is_empty() {
+        path.as_ref()
+    } else {
         // Only a separator marks a real directory boundary: `/app` must not
         // match `/apps/web/Button.tsx` and eat the `s`.
-        Some(relative) if relative.starts_with('/') => relative.trim_start_matches('/').to_string(),
-        _ => path.into_owned(),
-    }
+        let stripped = path.strip_prefix(root_dir)?;
+        if !stripped.starts_with('/') {
+            return None;
+        }
+        stripped.trim_start_matches('/')
+    };
+
+    (!is_inside_dependencies(relative)).then(|| relative.to_string())
 }
 
 pub fn extract_absolute_path(filename: &FileName) -> Option<String> {

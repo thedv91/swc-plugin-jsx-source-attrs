@@ -2,7 +2,7 @@ pub mod config;
 pub mod path_utils;
 
 use config::PluginConfig;
-use path_utils::{extract_absolute_path, relativize_path, resolve_root_dir};
+use path_utils::{extract_absolute_path, project_relative_path, resolve_root_dir};
 use swc_core::{
     common::{FileName, SourceMapper, Span, DUMMY_SP},
     ecma::{
@@ -48,8 +48,8 @@ fn props_name(first_param: Option<&Pat>) -> Option<Atom> {
 
 pub struct JsxSourceAttrsVisitor {
     attr_ident: IdentName,
-    /// The path every element in this module reports. `None` when the host gave
-    /// us no usable filename.
+    /// The file path every element in this module reports, before any position
+    /// suffix. `None` when the host gave us no usable filename.
     source_path: Option<Str>,
     /// Resolves a `BytePos` to line/column. Absent for native callers: the host
     /// proxy only answers inside wasm.
@@ -66,10 +66,7 @@ impl JsxSourceAttrsVisitor {
         source_map: Option<Box<dyn SourceMapper>>,
     ) -> Self {
         let source_path = extract_absolute_path(filename)
-            .map(|value| match config.root_dir.as_deref() {
-                Some(root_dir) => relativize_path(&value, root_dir),
-                None => value,
-            })
+            .and_then(|value| project_relative_path(&value, config.root_dir.as_deref()))
             .map(|value| Str {
                 span: DUMMY_SP,
                 value: value.into(),
