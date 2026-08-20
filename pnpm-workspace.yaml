@@ -1,2 +1,8 @@
+packages:
+  - 'examples/*'
+
 allowBuilds:
   '@swc/core': true
+  '@tailwindcss/oxide': true
+  sharp: true
+  unrs-resolver: true

@@ -23,7 +23,11 @@ export function transform(
   }
 
   const options: Options = {
-    filename: path.resolve(swcOptions.filename ?? "tests/e2e/Button.jsx"),
+    // A bundler virtual root such as `[project]/…` is not a filesystem path
+    // and must reach the plugin untouched.
+    filename: (swcOptions.filename ?? "tests/e2e/Button.jsx").startsWith("[")
+      ? swcOptions.filename!
+      : path.resolve(swcOptions.filename ?? "tests/e2e/Button.jsx"),
     jsc,
   };
   if (swcOptions.isModule !== undefined) {

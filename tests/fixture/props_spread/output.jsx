@@ -1,9 +1,9 @@
 function Passthrough(props) {
-    return <div {...props}/>;
+    return <div data-source-path="src/props_spread.jsx" {...props}/>;
 }
 function Rest({ children, ...rest }) {
-    return <section {...rest}>{children}</section>;
+    return <section data-source-path="src/props_spread.jsx" {...rest}>{children}</section>;
 }
 function Unrelated(props) {
-    return <article {...somethingElse} data-source-path="src/props_spread.jsx"/>;
+    return <article data-source-path="src/props_spread.jsx" {...somethingElse}/>;
 }

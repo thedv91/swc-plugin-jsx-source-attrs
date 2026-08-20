@@ -70,7 +70,7 @@ function Shell() {
   assert.match(code, /"em", \{\s+"data-source-path"/);
 });
 
-test("skips an element that spreads the enclosing props", () => {
+test("lets a forwarded props spread win over the element's own value", () => {
   const code = transform(`function Passthrough(props) {
   return <div {...props} />;
 }
@@ -83,14 +83,17 @@ function Unrelated() {
   return <article {...somethingElse} />;
 }`);
 
-  // Spreading the caller's props forwards whatever they already annotated;
-  // appending here would replace their position with this wrapper's.
-  assert.match(code, /createElement\("div", props\)/);
-
-  // Of the three elements only <article /> is annotated: its spread is some
-  // unrelated object, not the enclosing props.
-  assert.equal((code.match(/data-source-path/g) ?? []).length, 1);
-  assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx:10:10"/);
+  // Every element is annotated, but the attribute goes in *first*, so a
+  // caller's forwarded value overwrites it at runtime. Getting this through
+  // ordering rather than through code inspection is what keeps server and
+  // client agreeing under Turbopack.
+  assert.equal((code.match(/data-source-path/g) ?? []).length, 3);
+  for (const spread of ["props", "rest", "somethingElse"]) {
+    assert.match(
+      code,
+      new RegExp(`"data-source-path": "[^"]*"[\\s\\S]{0,80}?${spread}`)
+    );
+  }
 });
 
 test("does not overwrite an attribute already on the element", () => {
@@ -184,4 +187,27 @@ function App() {
   // What you want when you click a library component is the line in your own
   // code that rendered it — which is exactly where this element sits.
   assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx:4:10"/);
+});
+
+test("handles Turbopack's virtual project root", () => {
+  // Turbopack does not hand plugins filesystem paths; it addresses modules as
+  // `[project]/…`. Measuring that against an absolute root rejects every file,
+  // which silently disables the plugin under Next.js.
+  const code = transform(`function Card() { return <article />; }`, {}, {
+    filename: "[project]/src/components/Card.tsx",
+  });
+
+  assert.match(code, /"data-source-path": "src\/components\/Card\.tsx:1:26"/);
+});
+
+test("skips dependencies and bundler code behind a virtual root", () => {
+  const dependency = transform(`function L() { return <span />; }`, {}, {
+    filename: "[project]/node_modules/some-lib/index.js",
+  });
+  const bundler = transform(`function N() { return <span />; }`, {}, {
+    filename: "[next]/dist/client/app.js",
+  });
+
+  assert.doesNotMatch(dependency, /data-source-path/);
+  assert.doesNotMatch(bundler, /data-source-path/);
 });

@@ -7,7 +7,6 @@ use swc_core::{
     common::{FileName, SourceMapper, Span, DUMMY_SP},
     ecma::{
         ast::*,
-        atoms::Atom,
         visit::{noop_visit_mut_type, VisitMut, VisitMutWith},
     },
     plugin::{
@@ -30,22 +29,6 @@ fn is_fragment_name(name: &JSXElementName) -> bool {
     }
 }
 
-/// The identifier a function binds its whole props object to, if any:
-/// `(props) => …` or `({ ...rest }) => …`.
-fn props_name(first_param: Option<&Pat>) -> Option<Atom> {
-    match first_param? {
-        Pat::Ident(ident) => Some(ident.id.sym.clone()),
-        Pat::Object(object) => object.props.iter().find_map(|prop| match prop {
-            ObjectPatProp::Rest(rest) => match rest.arg.as_ref() {
-                Pat::Ident(ident) => Some(ident.id.sym.clone()),
-                _ => None,
-            },
-            _ => None,
-        }),
-        _ => None,
-    }
-}
-
 pub struct JsxSourceAttrsVisitor {
     attr_ident: IdentName,
     /// The file path every element in this module reports, before any position
@@ -55,8 +38,6 @@ pub struct JsxSourceAttrsVisitor {
     /// proxy only answers inside wasm.
     source_map: Option<Box<dyn SourceMapper>>,
     position: bool,
-    /// Name bound to the enclosing function's props object, if any.
-    current_props_name: Option<Atom>,
 }
 
 impl JsxSourceAttrsVisitor {
@@ -78,7 +59,6 @@ impl JsxSourceAttrsVisitor {
             source_path,
             source_map,
             position: config.position,
-            current_props_name: None,
         }
     }
 
@@ -123,60 +103,25 @@ impl JsxSourceAttrsVisitor {
             return false;
         }
 
+        // Only named attributes are inspected. A spread cannot state the
+        // attribute name here, and whatever it forwards at runtime is handled
+        // by insertion order instead.
         for attr in &opening_element.attrs {
-            match attr {
-                JSXAttrOrSpread::JSXAttr(jsx_attr) => {
-                    // Written by hand, or by an earlier run over the same file.
-                    if matches!(&jsx_attr.name, JSXAttrName::Ident(ident) if ident.sym == self.attr_ident.sym)
-                    {
-                        return false;
-                    }
+            if let JSXAttrOrSpread::JSXAttr(jsx_attr) = attr {
+                // Written by hand, or by an earlier run over the same file.
+                if matches!(&jsx_attr.name, JSXAttrName::Ident(ident) if ident.sym == self.attr_ident.sym)
+                {
+                    return false;
                 }
-                JSXAttrOrSpread::SpreadElement(spread) => {
-                    // Spreading the enclosing props forwards whatever the
-                    // caller already annotated. Appending here would win over
-                    // the spread and replace the caller's real position with
-                    // this wrapper's.
-                    let Some(props_name) = self.current_props_name.as_ref() else {
-                        continue;
-                    };
-                    if matches!(spread.expr.as_ref(), Expr::Ident(ident) if ident.sym == *props_name)
-                    {
-                        return false;
-                    }
-                }
-                // The wasm build adds an `Unknown` variant (see
-                // `.cargo/config.toml`), which the native build does not have.
-                #[cfg(swc_ast_unknown)]
-                _ => {}
             }
         }
 
         true
     }
-
-    fn visit_with_props_name<N>(&mut self, node: &mut N, props_name: Option<Atom>)
-    where
-        N: VisitMutWith<Self>,
-    {
-        let previous = std::mem::replace(&mut self.current_props_name, props_name);
-        node.visit_mut_children_with(self);
-        self.current_props_name = previous;
-    }
 }
 
 impl VisitMut for JsxSourceAttrsVisitor {
     noop_visit_mut_type!();
-
-    fn visit_mut_function(&mut self, node: &mut Function) {
-        let props_name = props_name(node.params.first().map(|param| &param.pat));
-        self.visit_with_props_name(node, props_name);
-    }
-
-    fn visit_mut_arrow_expr(&mut self, node: &mut ArrowExpr) {
-        let props_name = props_name(node.params.first());
-        self.visit_with_props_name(node, props_name);
-    }
 
     fn visit_mut_jsx_opening_element(&mut self, node: &mut JSXOpeningElement) {
         // Children first: appending before the walk would make the new
@@ -191,11 +136,20 @@ impl VisitMut for JsxSourceAttrsVisitor {
             return;
         };
 
-        node.attrs.push(JSXAttrOrSpread::JSXAttr(JSXAttr {
-            span: DUMMY_SP,
-            name: JSXAttrName::Ident(self.attr_ident.clone()),
-            value: Some(JSXAttrValue::Str(value)),
-        }));
+        // Inserted first, never appended. A later `{...props}` then overwrites
+        // it, which is what forwards a caller's annotation through a wrapper —
+        // and it does so by JSX evaluation order, not by inspecting the code.
+        // Inspecting was the old approach, and it broke under Turbopack, whose
+        // client pipeline hands the plugin an already-transformed tree that no
+        // longer looks like the source.
+        node.attrs.insert(
+            0,
+            JSXAttrOrSpread::JSXAttr(JSXAttr {
+                span: DUMMY_SP,
+                name: JSXAttrName::Ident(self.attr_ident.clone()),
+                value: Some(JSXAttrValue::Str(value)),
+            }),
+        );
     }
 }
 

@@ -86,6 +86,37 @@ fn test_project_relative_path() {
         Some("src/Button.tsx".to_string())
     );
 
+    // Turbopack addresses modules through a virtual root instead of the
+    // filesystem, and `root-dir` has no bearing on those
+    assert_eq!(
+        project_relative_path("[project]/src/Button.tsx", root),
+        Some("src/Button.tsx".to_string())
+    );
+    assert_eq!(
+        project_relative_path("[project]/src/Button.tsx", None),
+        Some("src/Button.tsx".to_string())
+    );
+    assert_eq!(
+        project_relative_path("[project]/node_modules/lib/index.js", root),
+        None
+    );
+    // ...and any other virtual root is the bundler's own code
+    assert_eq!(
+        project_relative_path("[next]/dist/client/app.js", root),
+        None
+    );
+    assert_eq!(project_relative_path("[externals]/react.js", None), None);
+
+    // A host that hands us a relative path has already made it project-relative
+    assert_eq!(
+        project_relative_path("src/Button.tsx", root),
+        Some("src/Button.tsx".to_string())
+    );
+    assert_eq!(
+        project_relative_path("node_modules/lib/index.js", root),
+        None
+    );
+
     // An empty root dir filters nothing
     assert_eq!(
         project_relative_path("/home/me/app/src/Button.tsx", Some("")),

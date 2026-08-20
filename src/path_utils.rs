@@ -99,6 +99,11 @@ fn is_inside_dependencies(path: &str) -> bool {
     path.split('/').any(|segment| segment == "node_modules")
 }
 
+/// Turbopack does not hand plugins filesystem paths. It addresses every module
+/// through a virtual root: `[project]/src/App.tsx` for your own source, and
+/// `[next]/…`, `[externals]/…` and friends for what the bundler injects.
+const TURBOPACK_PROJECT_ROOT: &str = "[project]/";
+
 /// Make `path` relative to `root_dir`, or return `None` when the file is not
 /// part of the project — outside the root, or inside a dependency.
 ///
@@ -112,6 +117,23 @@ fn is_inside_dependencies(path: &str) -> bool {
 /// is identical on every platform.
 pub fn project_relative_path(path: &str, root_dir: Option<&str>) -> Option<String> {
     let path = normalize_separators(path);
+
+    // Under Turbopack the path is already project-relative once its virtual
+    // root is removed, and `root-dir` has nothing to say about it.
+    if let Some(relative) = path.strip_prefix(TURBOPACK_PROJECT_ROOT) {
+        return (!is_inside_dependencies(relative)).then(|| relative.to_string());
+    }
+
+    // Any other virtual root is the bundler's own code, not the project's.
+    if path.starts_with('[') {
+        return None;
+    }
+
+    // A host that hands us a relative path has already made it relative to the
+    // project; measuring it against an absolute root would only reject it.
+    if !is_absolute(&path) {
+        return (!is_inside_dependencies(&path)).then(|| path.into_owned());
+    }
 
     let Some(root_dir) = root_dir else {
         // With no root there is nothing to measure "inside the project"
