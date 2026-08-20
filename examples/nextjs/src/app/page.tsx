@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Card } from "@/components/Card";
+import { ClientPanel } from "@/components/ClientPanel";
 import { Spread } from "@/components/Spread";
 
 export default function Home() {
@@ -32,6 +33,12 @@ export default function Home() {
           this paragraph keeps the position of the <code>&lt;Spread&gt;</code>{" "}
           call site, not the one inside the component
         </Spread>
+      </Card>
+
+      <Card title="Client component">
+        <ClientPanel>
+          a hydrated element: server and client must agree on the attribute
+        </ClientPanel>
       </Card>
 
       <Card title="Hand-written attribute">

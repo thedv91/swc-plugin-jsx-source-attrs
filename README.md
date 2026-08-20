@@ -98,13 +98,51 @@ The library's internal `<button>` gets nothing, so the innermost annotated eleme
 - **Elements that spread the enclosing props** — `function Wrapper(props) { return <div {...props} /> }`. The spread already forwards whatever the caller annotated; appending here would overwrite the caller's real position with the wrapper's.
 - **Elements that already have the attribute** — written by hand, or by an earlier pass over the same file.
 
-## Known limitation: React Compiler
+## Known limitation: the React Compiler
 
-With `jsc.transform.reactCompiler` enabled, **positions are lost** — the attribute is still emitted, but as the bare file path with no `:line:column`.
+Everything below has one root cause. An SWC plugin cannot choose where it sits in the transform chain — it runs *after* the host's own transforms. So it never sees your source; it sees whatever the host has already done to it.
 
-SWC runs experimental plugins after its own transforms, and the React Compiler rebuilds the JSX tree with no source spans attached. There is nothing left to resolve a position from. The plugin detects this and emits the path alone; without that check the host panics with `NoFileFor(BytePos(0))` and the build dies.
+### Positions are lost with the React Compiler
 
-TanStack Devtools is unaffected because it transforms the original source before any of this happens.
+With `jsc.transform.reactCompiler` enabled, the attribute is still emitted, but as the bare file path with no `:line:column`.
+
+The React Compiler rebuilds the JSX tree with no source spans attached, so there is nothing left to resolve a position from. The plugin detects this and emits the path alone; without that check the host panics with `NoFileFor(BytePos(0))` and the build dies.
+
+### Next.js before 16.3: set `position: false`
+
+```jsonc
+['swc-plugin-jsx-source-attrs', { position: false }]
+```
+
+With the Babel React Compiler — the only option before 16.3 — the server and client pipelines do not hand the plugin the same tree. The server sees something close to your source; the client sees a tree that has already been through Babel, which runs outside Turbopack in Node. Line numbers taken from the client tree do not exist in your file — a 40-line file reports line 41 — and because the two pipelines disagree, React reports a hydration mismatch on every annotated element.
+
+The file path itself is stable across both, so `position: false` gives you a working attribute. On 16.3 you can keep positions instead — see below.
+
+### Next.js 16.3: the Rust React Compiler fixes it
+
+Next.js 16.3 added [`experimental.turbopackRustReactCompiler`](https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopackRustReactCompiler), which runs the React Compiler as native code inside Turbopack instead of shelling out to Babel through Node. That removes the pass which was mangling the client tree:
+
+```ts
+const nextConfig: NextConfig = {
+  reactCompiler: true,
+  experimental: {
+    turbopackRustReactCompiler: true,
+  },
+}
+```
+
+Verified on Next.js 16.3.1 in [`examples/nextjs`](examples/nextjs) — positions come back, and are correct:
+
+| | `data-source-path` |
+| --- | --- |
+| Server Components | full position, e.g. `src/app/page.tsx:7:5` for the `<main>` on line 7 |
+| Client Components | bare path, no position — **but identical on server and client**, so nothing mismatches |
+
+Client Components still lose their positions, because the React Compiler rebuilds their tree without spans, as described above. The difference from the Babel pass is that both pipelines now agree, so there is no hydration warning.
+
+Two caveats worth stating plainly. The flag is experimental and Next.js does not recommend it for production. And this was checked by comparing the prerendered markup against the client bundle, not by watching a browser console — the two strings are identical, which is what React compares, but nobody has sat and watched it hydrate.
+
+TanStack Devtools sidesteps all of this: as a Vite plugin with `enforce: 'pre'`, it transforms the original source before anything else runs.
 
 ## Credits
 
