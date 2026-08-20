@@ -112,3 +112,6 @@ target
 *.wasm
 .serena
 .codegraph
+.claude
+.cursor
+.agents

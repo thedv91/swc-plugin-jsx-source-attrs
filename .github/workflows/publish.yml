@@ -38,14 +38,29 @@ jobs:
       - name: Update npm
         run: npm install -g npm@latest
 
-      # npm cannot unpublish a version after 72 hours, so refuse to release a
-      # tag that disagrees with the version actually being published.
-      - name: Verify tag matches package version
+      # npm cannot unpublish a version after 72 hours, so refuse to release
+      # anything the tag, the crate and the changelog do not all agree on.
+      # The crate version is a separate source of truth that nothing else keeps
+      # in sync with package.json, and it has drifted before (see 5d2643f).
+      - name: Verify release metadata
         run: |
           tag="${GITHUB_REF_NAME#v}"
           version="$(node -p 'require("./package.json").version')"
+          crate="$(awk '
+            /^\[package\]/ { in_package = 1; next }
+            /^\[/ { in_package = 0 }
+            in_package && /^version[[:space:]]*=/ { gsub(/"/, "", $NF); print $NF; exit }
+          ' Cargo.toml)"
           if [ "$tag" != "$version" ]; then
             echo "Release tag $GITHUB_REF_NAME does not match package.json version $version" >&2
+            exit 1
+          fi
+          if [ "$crate" != "$version" ]; then
+            echo "Cargo.toml version $crate does not match package.json version $version" >&2
+            exit 1
+          fi
+          if ! grep -q "^## $version (" CHANGELOG.md; then
+            echo "CHANGELOG.md has no section for $version" >&2
             exit 1
           fi
 
@@ -65,3 +80,30 @@ jobs:
       # `prepack` rebuilds the wasm and copies it into the package root.
       - name: publish
         run: npm publish
+
+  release-notes:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      # Deliberately a separate job: the one holding the npm OIDC token stays
+      # read-only against the repository.
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Fill release notes from the changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Notes written by hand when cutting the release win over the changelog.
+          if [ -n "$(gh release view "$GITHUB_REF_NAME" --json body --jq '.body // ""')" ]; then
+            echo "Release already has notes, leaving them alone."
+            exit 0
+          fi
+          # The section runs from its own heading to the next release heading.
+          awk -v heading="## ${GITHUB_REF_NAME#v} (" '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          gh release edit "$GITHUB_REF_NAME" --notes-file notes.md
