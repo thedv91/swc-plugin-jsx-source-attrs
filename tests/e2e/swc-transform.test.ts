@@ -39,3 +39,55 @@ test("uses a camelCase attribute name for React Native", () => {
 
   assert.match(code, /dataSourcePath:/);
 });
+
+test("skips fragments, which have no host node", () => {
+  const code = transform(`import React from 'react';
+
+function Shell() {
+  return (
+    <>
+      <Fragment><span>a</span></Fragment>
+      <React.Fragment><em>b</em></React.Fragment>
+    </>
+  );
+}`);
+
+  assert.doesNotMatch(code, /Fragment, \{/);
+  assert.match(code, /"span", \{\s+"data-source-path"/);
+  assert.match(code, /"em", \{\s+"data-source-path"/);
+});
+
+test("skips an element that spreads the enclosing props", () => {
+  const code = transform(`function Passthrough(props) {
+  return <div {...props} />;
+}
+
+function Rest({ children, ...rest }) {
+  return <section {...rest}>{children}</section>;
+}
+
+function Unrelated() {
+  return <article {...somethingElse} />;
+}`);
+
+  // Spreading the caller's props forwards whatever they already annotated;
+  // appending here would replace their position with this wrapper's.
+  assert.match(code, /createElement\("div", props\)/);
+
+  // Of the three elements only <article /> is annotated: its spread is some
+  // unrelated object, not the enclosing props.
+  assert.equal((code.match(/data-source-path/g) ?? []).length, 1);
+});
+
+test("does not overwrite an attribute already on the element", () => {
+  const code = transform(`function Shell() {
+  return (
+    <div data-source-path="hand-written">
+      <span>sibling</span>
+    </div>
+  );
+}`);
+
+  assert.match(code, /"data-source-path": "hand-written"/);
+  assert.equal((code.match(/data-source-path/g) ?? []).length, 2);
+});
