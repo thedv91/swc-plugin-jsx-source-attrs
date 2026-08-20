@@ -1,7 +1,9 @@
 pub mod config;
+pub mod glob;
 pub mod path_utils;
 
 use config::PluginConfig;
+use glob::{name_is_ignored, path_is_ignored};
 use path_utils::{
     extract_absolute_path, project_relative_path, relative_root_dir, resolve_root_dir,
 };
@@ -31,6 +33,46 @@ fn is_fragment_name(name: &JSXElementName) -> bool {
     }
 }
 
+/// The element's name as it is written, so an `ignore` pattern can be matched
+/// against what the author sees: `Foo`, `Foo.Bar`, `svg:rect`.
+///
+/// The wildcard arms below are load-bearing on `wasm32`, where the AST enums
+/// come from a `swc_core` built with only `ecma_plugin_transform` and are
+/// `#[non_exhaustive]` — the build fails without them. The native test build
+/// pulls in more features, sees the same enums as closed, and calls the arms
+/// unreachable. Only one of the two can be satisfied; the one that ships wins.
+#[allow(unreachable_patterns)]
+fn element_name(name: &JSXElementName) -> String {
+    match name {
+        JSXElementName::Ident(ident) => ident.sym.to_string(),
+        JSXElementName::JSXMemberExpr(member_expr) => {
+            let mut object = &member_expr.obj;
+            let mut parts = vec![member_expr.prop.sym.to_string()];
+            loop {
+                match object {
+                    JSXObject::Ident(ident) => {
+                        parts.push(ident.sym.to_string());
+                        break;
+                    }
+                    JSXObject::JSXMemberExpr(inner) => {
+                        parts.push(inner.prop.sym.to_string());
+                        object = &inner.obj;
+                    }
+                    _ => break,
+                }
+            }
+            parts.reverse();
+            parts.join(".")
+        }
+        JSXElementName::JSXNamespacedName(namespaced) => {
+            format!("{}:{}", namespaced.ns.sym, namespaced.name.sym)
+        }
+        // The AST enum is `#[non_exhaustive]`. A name we cannot spell cannot be
+        // written as a pattern either, so it matches nothing.
+        _ => String::new(),
+    }
+}
+
 pub struct JsxSourceAttrsVisitor {
     attr_ident: IdentName,
     /// The file path every element in this module reports, before any position
@@ -40,6 +82,9 @@ pub struct JsxSourceAttrsVisitor {
     /// proxy only answers inside wasm.
     source_map: Option<Box<dyn SourceMapper>>,
     position: bool,
+    /// Element-name globs to leave unannotated. Empty for the common case, so
+    /// the check costs nothing when the option is unused.
+    ignored_components: Vec<String>,
 }
 
 impl JsxSourceAttrsVisitor {
@@ -56,6 +101,9 @@ impl JsxSourceAttrsVisitor {
                     config.relative_root_dir.as_deref(),
                 )
             })
+            // An ignored file is dropped here rather than per element: the
+            // whole module reports one path, so one check settles all of them.
+            .filter(|value| !path_is_ignored(value, &config.ignore.files))
             .map(|value| Str {
                 span: DUMMY_SP,
                 value: value.into(),
@@ -67,6 +115,7 @@ impl JsxSourceAttrsVisitor {
             source_path,
             source_map,
             position: config.position,
+            ignored_components: config.ignore.components,
         }
     }
 
@@ -108,6 +157,15 @@ impl JsxSourceAttrsVisitor {
 
     fn should_annotate(&self, opening_element: &JSXOpeningElement) -> bool {
         if is_fragment_name(&opening_element.name) {
+            return false;
+        }
+
+        if !self.ignored_components.is_empty()
+            && name_is_ignored(
+                &element_name(&opening_element.name),
+                &self.ignored_components,
+            )
+        {
             return false;
         }
 

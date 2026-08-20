@@ -8,14 +8,28 @@ import type { NextConfig } from "next";
 const plugin =
   "../../target/wasm32-unknown-unknown/release/swc_plugin_jsx_source_attrs.wasm";
 
+// Which bundler is running is not on `NextConfig`, and the `--webpack` flag
+// cannot be read back: `next dev` reloads this file in a child process, and
+// `next build` in workers, neither of which is given that argument. Turbopack
+// exports `TURBOPACK` into all of them, and webpack leaves it unset -- that is
+// the only signal that survives.
+const webpack = !process.env.TURBOPACK;
+
 const nextConfig: NextConfig = {
-  reactCompiler: true,
+  // Only Turbopack can run the React Compiler as native code. Under webpack it
+  // is Babel's, which runs before the plugin and renumbers the client tree, so
+  // positions there would have to be given up -- see "The React Compiler" in
+  // the root README.
+  reactCompiler: !webpack,
   experimental: {
-    turbopackRustReactCompiler: true,
-    // No `root-dir`: Turbopack runs from the workspace root it detects (the
-    // repo root here, not this directory), so paths come out as
-    // `examples/nextjs/src/app/page.tsx`. Set `root-dir: "examples/nextjs"` to
-    // get plain `src/app/page.tsx` instead.
+    // Next rejects this flag under webpack whether it is true or false, so it
+    // has to be absent there rather than disabled.
+    ...(webpack ? {} : { turbopackRustReactCompiler: true }),
+    // No `root-dir`, which is also why the two bundlers report different paths
+    // here: Turbopack runs from the workspace root it detects (the repo root,
+    // not this directory) and reports `examples/nextjs/src/app/page.tsx`, while
+    // webpack runs from this directory and reports `src/app/page.tsx`. Setting
+    // `root-dir: "examples/nextjs"` gives the shorter form under both.
     swcPlugins: [[plugin, {}]],
   },
 };

@@ -1,5 +1,21 @@
 use serde::{Deserialize, Serialize};
 
+/// Source the plugin leaves alone even though it is project code.
+///
+/// Patterns are globs, not regexes — a config crosses into the plugin as JSON,
+/// where a JavaScript `RegExp` serializes to `{}` and is lost. See `glob.rs`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct IgnoreConfig {
+    /// Project-relative paths to skip entirely, e.g. `*.test.tsx`.
+    #[serde(default)]
+    pub files: Vec<String>,
+
+    /// Element names to leave unannotated, e.g. `*Lazy`. Their children are
+    /// still annotated — this skips the element, not the subtree.
+    #[serde(default)]
+    pub components: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginConfig {
     /// Attribute name to emit (default: `data-source-path`)
@@ -25,10 +41,9 @@ pub struct PluginConfig {
     #[serde(default = "enabled", rename = "position")]
     pub position: bool,
 
-    /// Use a camelCase attribute name for React Native, which rejects
-    /// kebab-case props
-    #[serde(default, rename = "native")]
-    pub native: bool,
+    /// Files and components to leave unannotated
+    #[serde(default, rename = "ignore")]
+    pub ignore: IgnoreConfig,
 }
 
 fn enabled() -> bool {
@@ -43,20 +58,17 @@ impl Default for PluginConfig {
             source_path_attr: None,
             root_dir: None,
             relative_root_dir: None,
+            ignore: IgnoreConfig::default(),
             position: true,
-            native: false,
         }
     }
 }
 
 impl PluginConfig {
     pub fn source_path_attr_name(&self) -> &str {
-        if let Some(ref custom) = self.source_path_attr {
-            custom
-        } else if self.native {
-            "dataSourcePath"
-        } else {
-            "data-source-path"
+        match self.source_path_attr {
+            Some(ref custom) => custom,
+            None => "data-source-path",
         }
     }
 }

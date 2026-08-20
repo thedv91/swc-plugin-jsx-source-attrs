@@ -47,8 +47,8 @@ test("uses a custom attribute name", () => {
   assert.doesNotMatch(code, /data-source-path/);
 });
 
-test("uses a camelCase attribute name for React Native", () => {
-  const code = transform(NESTED, {native: true});
+test("takes a camelCase attribute name as written", () => {
+  const code = transform(NESTED, {"source-path-attr": "dataSourcePath"});
 
   assert.match(code, /dataSourcePath: "tests\/e2e\/Button\.jsx:3:5"/);
 });
@@ -131,6 +131,19 @@ test("anchors a relative root-dir to the working directory", () => {
     code,
     new RegExp(`"data-source-path": "${enclosing}/tests/e2e/Button\\.jsx:1:28"`)
   );
+});
+
+test("reads a relative root-dir naming the working directory as that directory", () => {
+  // The webpack half of a monorepo config: `root-dir: apps/web` is what
+  // Turbopack needs, since it measures paths from the repo root, but webpack
+  // runs the same build from inside `apps/web`. Joined there it would ask for
+  // `apps/web/apps/web`, which no file is under, and every attribute would go.
+  const here = path.basename(process.cwd());
+  const code = transform(`function Button() { return <div />; }`, {
+    "root-dir": here,
+  });
+
+  assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx:1:28"/);
 });
 
 test("takes an absolute root-dir verbatim", () => {
@@ -245,4 +258,39 @@ test("skips dependencies and bundler code behind a virtual root", () => {
 
   assert.doesNotMatch(dependency, /data-source-path/);
   assert.doesNotMatch(bundler, /data-source-path/);
+});
+
+test("leaves an ignored file alone", () => {
+  const code = transform(`function Spec() { return <div />; }`, {
+    ignore: {files: ["*.test.jsx"]},
+  }, {filename: "tests/e2e/Button.test.jsx"});
+
+  assert.doesNotMatch(code, /data-source-path/);
+});
+
+test("leaves ignored components alone, but not their children", () => {
+  const code = transform(`function App() {
+  return (
+    <Providers>
+      <ButtonLazy>
+        <span />
+      </ButtonLazy>
+    </Providers>
+  );
+}`, {ignore: {components: ["Providers", "*Lazy"]}});
+
+  assert.doesNotMatch(code, /"data-source-path": "[^"]*:3:5"/);
+  assert.doesNotMatch(code, /"data-source-path": "[^"]*:4:7"/);
+  // The child of an ignored component is still project code the author wrote
+  assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx:5:9"/);
+});
+
+test("a RegExp in ignore cannot survive the JSON boundary", () => {
+  // Documents why the option takes glob strings: SWC serializes the plugin
+  // config with JSON.stringify, and a RegExp comes out the other side as {}
+  const code = transform(`function App() { return <ButtonLazy />; }`, {
+    ignore: {components: [/.*Lazy$/]},
+  });
+
+  assert.match(code, /data-source-path/);
 });

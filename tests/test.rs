@@ -265,6 +265,37 @@ fn test_resolve_root_dir() {
         Some("/repo/apps/web".to_string())
     );
 
+    // A relative root-dir names the project the way Turbopack reports paths,
+    // from the repo root. Webpack runs the same build inside that directory, so
+    // the value it would be joined to is the directory itself — joining would
+    // ask for `/repo/apps/web/apps/web`, which no file is under.
+    assert_eq!(
+        resolve_root_dir(Some("apps/web"), Some("/repo/apps/web")),
+        Some("/repo/apps/web".to_string())
+    );
+    assert_eq!(
+        resolve_root_dir(Some("apps\\web"), Some("C:\\repo\\apps\\web")),
+        Some("C:/repo/apps/web".to_string())
+    );
+
+    assert_eq!(
+        resolve_root_dir(Some("./apps/web"), Some("/repo/apps/web")),
+        Some("/repo/apps/web".to_string())
+    );
+
+    // ...while the same config run from the repo root still resolves by joining
+    assert_eq!(
+        resolve_root_dir(Some("apps/web"), Some("/repo")),
+        Some("/repo/apps/web".to_string())
+    );
+
+    // A partial segment match is a different directory, so it is joined as
+    // written: `web` is not the tail of `myweb`
+    assert_eq!(
+        resolve_root_dir(Some("web"), Some("/repo/apps/myweb")),
+        Some("/repo/apps/myweb/web".to_string())
+    );
+
     // An absolute root-dir is taken verbatim, working directory ignored
     assert_eq!(
         resolve_root_dir(Some("/somewhere/else"), Some("/repo/apps/web")),
@@ -295,6 +326,71 @@ fn test_resolve_root_dir() {
 }
 
 #[test]
+fn test_path_is_ignored() {
+    use swc_plugin_jsx_source_attrs::glob::path_is_ignored;
+
+    let patterns = vec![
+        "*.test.tsx".to_string(),
+        "dist".to_string(),
+        "src/generated/*".to_string(),
+    ];
+
+    // A pattern without a separator matches any one segment, wherever it sits
+    assert!(path_is_ignored("src/Button.test.tsx", &patterns));
+    assert!(path_is_ignored("Button.test.tsx", &patterns));
+    assert!(path_is_ignored("dist/index.js", &patterns));
+    assert!(path_is_ignored("packages/ui/dist/index.js", &patterns));
+
+    // ...and a `*` in one stays inside that segment, so it cannot swallow a
+    // directory boundary
+    assert!(!path_is_ignored("src/Button.tsx", &patterns));
+    assert!(!path_is_ignored("src/test.tsx/Button.tsx", &patterns));
+
+    // A pattern with a separator is measured against the whole path
+    assert!(path_is_ignored("src/generated/routes.ts", &patterns));
+    assert!(!path_is_ignored(
+        "src/generated/nested/routes.ts",
+        &patterns
+    ));
+    assert!(!path_is_ignored("app/src/generated/routes.ts", &patterns));
+
+    // `**` crosses separators, and a leading `**/` also means "no depth at all"
+    let deep = vec![
+        "**/*.stories.tsx".to_string(),
+        "src/**/*.gen.ts".to_string(),
+    ];
+    assert!(path_is_ignored("src/ui/Button.stories.tsx", &deep));
+    assert!(path_is_ignored("Button.stories.tsx", &deep));
+    assert!(path_is_ignored("src/a/b/c/routes.gen.ts", &deep));
+    assert!(path_is_ignored("src/routes.gen.ts", &deep));
+    assert!(!path_is_ignored("app/routes.gen.ts", &deep));
+
+    // No patterns, nothing ignored — the default has to stay free
+    assert!(!path_is_ignored("src/Button.tsx", &[]));
+}
+
+#[test]
+fn test_name_is_ignored() {
+    use swc_plugin_jsx_source_attrs::glob::name_is_ignored;
+
+    let patterns = vec!["YourComponent".to_string(), "*Lazy".to_string()];
+
+    assert!(name_is_ignored("YourComponent", &patterns));
+    assert!(name_is_ignored("ButtonLazy", &patterns));
+    assert!(name_is_ignored("Lazy", &patterns));
+
+    // Matched whole, so a name that merely contains the pattern is not covered
+    assert!(!name_is_ignored("YourComponentInner", &patterns));
+    assert!(!name_is_ignored("LazyButton", &patterns));
+    assert!(!name_is_ignored("div", &patterns));
+
+    // A dotted name is matched as written, which is what the author sees
+    let dotted = vec!["Motion.*".to_string()];
+    assert!(name_is_ignored("Motion.div", &dotted));
+    assert!(!name_is_ignored("Motion", &dotted));
+}
+
+#[test]
 fn test_config_parsing() {
     // Position is on by default, and both entry points must agree on that
     let default_config = PluginConfig::default();
@@ -316,14 +412,19 @@ fn test_config_parsing() {
     assert_eq!(configured.root_dir, Some("../..".to_string()));
     assert!(!configured.position);
 
-    // React Native rejects kebab-case props
-    let native: PluginConfig = serde_json::from_str(r#"{ "native": true }"#).unwrap();
-    assert_eq!(native.source_path_attr_name(), "dataSourcePath");
+    // `ignore` is optional on both halves, and absent means empty
+    assert!(empty.ignore.files.is_empty());
+    assert!(empty.ignore.components.is_empty());
 
-    // An explicit name wins over the native default
-    let native_named: PluginConfig =
-        serde_json::from_str(r#"{ "native": true, "source-path-attr": "sourceLoc" }"#).unwrap();
-    assert_eq!(native_named.source_path_attr_name(), "sourceLoc");
+    let ignoring: PluginConfig =
+        serde_json::from_str(r#"{ "ignore": { "components": ["*Lazy"] } }"#).unwrap();
+    assert_eq!(ignoring.ignore.components, vec!["*Lazy".to_string()]);
+    assert!(ignoring.ignore.files.is_empty());
+
+    // An unknown key is ignored rather than failing the whole config, so a
+    // dropped option cannot take a project's builds down with it
+    let unknown: PluginConfig = serde_json::from_str(r#"{ "native": true }"#).unwrap();
+    assert_eq!(unknown.source_path_attr_name(), "data-source-path");
 }
 
 #[testing::fixture("tests/fixture/*/input.jsx")]

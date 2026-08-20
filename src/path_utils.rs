@@ -63,6 +63,20 @@ fn normalize_dots(path: &str) -> String {
     format!("{}{}", root, segments.join("/"))
 }
 
+/// Whether the working directory already *is* the directory a relative
+/// `root-dir` names — `/repo/apps/web` for `apps/web`.
+fn cwd_is_root_dir(cwd: &str, root_dir: &str) -> bool {
+    let root_dir = root_dir.trim_end_matches('/');
+    let Some(prefix) = cwd.trim_end_matches('/').strip_suffix(root_dir) else {
+        return false;
+    };
+
+    // Only a separator marks a directory boundary, so `web` does not match a
+    // working directory that merely ends in `myweb`. It also rules out the
+    // empty root-dir, whose suffix match is vacuous.
+    prefix.ends_with('/')
+}
+
 /// Resolve the configured `root-dir` against the host's working directory.
 ///
 /// Leaving `root-dir` unset means the working directory itself, so a build run
@@ -83,11 +97,29 @@ pub fn resolve_root_dir(root_dir: Option<&str>, cwd: Option<&str>) -> Option<Str
     }
 
     match cwd {
-        Some(cwd) => Some(normalize_dots(&format!(
-            "{}/{}",
-            cwd.trim_end_matches('/'),
-            root_dir
-        ))),
+        Some(cwd) => {
+            let cwd = normalize_dots(&cwd);
+            // `./apps/web` names the same directory as `apps/web`, so both have
+            // to reach the comparison below in the same shape.
+            let root_dir = normalize_dots(&root_dir);
+
+            // A relative `root-dir` is usually written for Turbopack, which
+            // measures every path from the repo root: `apps/web` names the
+            // project inside it. Webpack runs the same build *from* that
+            // directory, where joining would look for `apps/web/apps/web` —
+            // a directory no file is under, so every attribute is dropped.
+            // Reading it as "we are already there" is what lets one config
+            // serve both bundlers.
+            if cwd_is_root_dir(&cwd, &root_dir) {
+                return Some(cwd);
+            }
+
+            Some(normalize_dots(&format!(
+                "{}/{}",
+                cwd.trim_end_matches('/'),
+                root_dir
+            )))
+        }
         // With no working directory a relative root-dir has nothing to anchor
         // to. Keep it as written so it simply fails to match and the path stays
         // absolute, rather than stripping some unrelated prefix.

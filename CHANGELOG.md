@@ -1,5 +1,53 @@
 # Changelog
 
+## 1.4.0 (2026-08-20)
+
+### Added
+
+- **`ignore`**, for project source that should stay unannotated — the counterpart to the option of the same name in [@tanstack/devtools-vite](https://tanstack.com/devtools):
+
+  ```jsonc
+  {
+    "ignore": {
+      "files": ["*.test.tsx", "src/generated/**"],
+      "components": ["Trans", "*Lazy"]
+    }
+  }
+  ```
+
+  An ignored file gets no attribute at all; an ignored component skips that element only, so its children stay annotated.
+
+  Patterns are globs rather than regexes, which is a real difference from the TanStack option and not an omission: the config reaches the plugin as JSON, and `JSON.stringify(/.*Lazy$/)` is `{}` — a `RegExp` cannot survive the crossing. `*` stays within a path segment, `**` crosses separators, and a `files` pattern without a `/` matches any single segment, as in `.gitignore`. The matcher is ~40 lines rather than the `regex` crate, which would have added several hundred kilobytes to a wasm module every dev build loads; the whole feature costs 11 KB.
+
+- **Next.js on webpack**, checked the same way Turbopack was: against a running app rather than a synthetic filename. `next dev --webpack` and `next build --webpack` on 16.3.1 emit the full `path:line:column`, and server and client agree — so `position: false`, which Turbopack needed before 16.3, is not wanted here.
+
+  The config is the same one Turbopack takes:
+
+  ```ts
+  // next.config.ts
+  experimental: {
+    swcPlugins: [["swc-plugin-jsx-source-attrs", {}]],
+  }
+  ```
+
+  What differs is the path each bundler reports, because webpack runs the build from the package while Turbopack roots it at the repo — see the `root-dir` fix below, which is what lets one value serve both.
+
+  The combination to avoid is webpack plus `reactCompiler: true`: `turbopackRustReactCompiler` is Turbopack-only and Next.js refuses to start with it under `--webpack`, so the React Compiler there is Babel's, running before the plugin and renumbering the client tree. Measured in [`examples/nextjs`](examples/nextjs): a 26-line client component reported lines 37, 45 and 54 in the client bundle against a real line 17 in the prerendered markup. Set `position: false` for that combination, on any version.
+
+  [`examples/nextjs`](examples/nextjs) now runs under either bundler — `pnpm --filter nextjs dev:webpack` and `build:webpack` alongside the Turbopack scripts.
+
+### Removed
+
+- **`native`**, which emitted `dataSourcePath` because React Native rejects kebab-case props. React Native builds through Metro and Babel, with no SWC in the chain, so the option promised a platform this plugin cannot reach.
+
+  The name it produced is still available as an ordinary value — `{"source-path-attr": "dataSourcePath"}` emits exactly what `native: true` did. A leftover `native` key is ignored rather than rejected, so an unchanged config keeps building; it just gets the default attribute name back.
+
+### Fixed
+
+- **A `root-dir` written for Turbopack dropped every attribute under webpack.** The two bundlers disagree about where a build runs: Turbopack roots the project at the repo, so a monorepo package needs `root-dir: apps/web`, while webpack runs the same build *from* `apps/web` — where that value was joined to the working directory and asked for `/repo/apps/web/apps/web`. No file is under it, so every file counted as outside the project and nothing was annotated at all.
+
+  A relative `root-dir` that names the directory the build is already running in now resolves to that directory. One config, `root-dir: apps/web`, emits `src/components/Button.tsx` under both bundlers.
+
 ## 1.3.0 (2026-08-20)
 
 ### Fixed
