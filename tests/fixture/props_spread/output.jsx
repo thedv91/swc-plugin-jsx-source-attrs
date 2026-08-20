@@ -5,5 +5,5 @@ function Rest({ children, ...rest }) {
     return <section {...rest}>{children}</section>;
 }
 function Unrelated(props) {
-    return <article {...somethingElse} data-source-path="/mock/root/src/props_spread.jsx"/>;
+    return <article {...somethingElse} data-source-path="src/props_spread.jsx"/>;
 }

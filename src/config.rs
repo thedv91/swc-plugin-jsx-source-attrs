@@ -6,6 +6,12 @@ pub struct PluginConfig {
     #[serde(default, rename = "source-path-attr")]
     pub source_path_attr: Option<String>,
 
+    /// Project root the emitted path is made relative to. Relative values are
+    /// resolved against the working directory; unset means the working
+    /// directory itself.
+    #[serde(default, rename = "root-dir")]
+    pub root_dir: Option<String>,
+
     /// Use a camelCase attribute name for React Native, which rejects
     /// kebab-case props
     #[serde(default, rename = "native")]

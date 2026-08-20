@@ -2,7 +2,7 @@ pub mod config;
 pub mod path_utils;
 
 use config::PluginConfig;
-use path_utils::extract_absolute_path;
+use path_utils::{extract_absolute_path, relativize_path, resolve_root_dir};
 use swc_core::{
     common::{FileName, DUMMY_SP},
     ecma::{
@@ -57,11 +57,16 @@ pub struct JsxSourceAttrsVisitor {
 
 impl JsxSourceAttrsVisitor {
     pub fn new(config: PluginConfig, filename: &FileName) -> Self {
-        let source_path = extract_absolute_path(filename).map(|value| Str {
-            span: DUMMY_SP,
-            value: value.into(),
-            raw: None,
-        });
+        let source_path = extract_absolute_path(filename)
+            .map(|value| match config.root_dir.as_deref() {
+                Some(root_dir) => relativize_path(&value, root_dir),
+                None => value,
+            })
+            .map(|value| Str {
+                span: DUMMY_SP,
+                value: value.into(),
+                raw: None,
+            });
 
         Self {
             attr_ident: IdentName::new(config.source_path_attr_name().into(), DUMMY_SP),
@@ -156,7 +161,7 @@ pub fn process_transform(
     mut program: Program,
     metadata: TransformPluginProgramMetadata,
 ) -> Program {
-    let config = if let Some(config_str) = metadata.get_transform_plugin_config() {
+    let mut config = if let Some(config_str) = metadata.get_transform_plugin_config() {
         serde_json::from_str::<PluginConfig>(&config_str).unwrap_or_default()
     } else {
         PluginConfig::default()
@@ -169,6 +174,12 @@ pub fn process_transform(
     } else {
         FileName::Custom("unknown".to_string())
     };
+
+    // The working directory is the default root, and the anchor a relative
+    // `root-dir` is resolved against, so it has to be read from the host here
+    // rather than inside the visitor.
+    let cwd = metadata.get_context(&TransformPluginMetadataContextKind::Cwd);
+    config.root_dir = resolve_root_dir(config.root_dir.as_deref(), cwd.as_deref());
 
     let mut visitor = JsxSourceAttrsVisitor::new(config, &filename);
     program.visit_mut_with(&mut visitor);

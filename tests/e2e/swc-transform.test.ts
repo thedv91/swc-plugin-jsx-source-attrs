@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import {test} from "node:test";
 
 import {transform} from "./helpers.ts";
@@ -15,7 +16,7 @@ const NESTED = `function GameModeNav() {
 
 test("annotates every element with its source file", () => {
   const code = transform(NESTED);
-  const file = `${process.cwd()}/tests/e2e/Button.jsx`;
+  const file = "tests/e2e/Button.jsx";
 
   for (const tag of ['"nav"', '"ul"', '"li"', "Item"]) {
     assert.match(
@@ -90,4 +91,32 @@ test("does not overwrite an attribute already on the element", () => {
 
   assert.match(code, /"data-source-path": "hand-written"/);
   assert.equal((code.match(/data-source-path/g) ?? []).length, 2);
+});
+
+test("defaults the root to the working directory", () => {
+  const code = transform(`function Button() { return <div />; }`);
+
+  assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx"/);
+});
+
+test("anchors a relative root-dir to the working directory", () => {
+  // Standing in for a monorepo app that wants repo-root-relative paths:
+  // ".." climbs out of the package the build is running in.
+  const enclosing = path.basename(process.cwd());
+  const code = transform(`function Button() { return <div />; }`, {
+    "root-dir": "..",
+  });
+
+  assert.match(
+    code,
+    new RegExp(`"data-source-path": "${enclosing}/tests/e2e/Button\\.jsx"`)
+  );
+});
+
+test("takes an absolute root-dir verbatim", () => {
+  const code = transform(`function Button() { return <div />; }`, {
+    "root-dir": process.cwd(),
+  });
+
+  assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx"/);
 });
