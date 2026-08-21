@@ -1,6 +1,6 @@
 {
   "name": "swc-plugin-jsx-source-attrs",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "SWC plugin that annotates every JSX element with the source file, line and column it was written at",
   "author": "Harry <thedv91@gmail.com>",
   "license": "MIT",
@@ -26,6 +26,8 @@
   "main": "swc_plugin_jsx_source_attrs.wasm",
   "files": [
     "CHANGELOG.md",
+    "config.d.ts",
+    "config.js",
     "loader",
     "src",
     "swc_plugin_jsx_source_attrs.wasm"

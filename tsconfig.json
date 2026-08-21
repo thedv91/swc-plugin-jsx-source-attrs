@@ -25,5 +25,5 @@
   // dropped `loader/index.js` from the program, so nothing in it was checked at
   // all. `loader/index.d.ts` is still compiled, through the `import type` in
   // `tests/e2e/loader-helpers.ts`.
-  "include": ["tests/e2e/**/*.ts", "loader/**/*.js"]
+  "include": ["tests/e2e/**/*.ts", "loader/**/*.js", "config.js"]
 }

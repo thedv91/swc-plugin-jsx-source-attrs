@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.7.0 (2026-08-21)
+
+### Added
+
+- **Config builders**, so wiring the loader is one call with the options autocompleted rather than a nested literal copied out of the README:
+
+  ```ts
+  // next.config.ts
+  import {turbopackRules} from "swc-plugin-jsx-source-attrs/config";
+
+  const nextConfig: NextConfig = {
+    turbopack: {rules: turbopackRules()},
+  };
+  ```
+
+  `webpackRule()` does the same for a `module.rules` entry, with `test` and `exclude` already set. Both take every option the loader takes, plus `enabled`, and one each — `extensions` (default `["jsx", "tsx"]`) and `test`.
+
+  `enabled` defaults to `process.env.NODE_ENV === "development"`, read when the builder is called rather than when it is imported, since a config file is loaded by more than one process and not all of them have set it by import time. Disabled, `turbopackRules()` returns `{}` and `webpackRule()` returns a rule matching no filename — so a production build carries the instrumentation only if you ask for it.
+
+  They return the rule and nothing else: a project usually has rules of its own, and something that merged them for you would have to pick a bundler's merge semantics and apply it out of sight. Spreading is clearer than a merge nobody can see.
+
+  The loader is named by an absolute path resolved from the package itself, not by the bare specifier. Under pnpm's default layout a project can require `swc-plugin-jsx-source-attrs` while the bundler, resolving from elsewhere, cannot — `loaderPath` is exported for anyone writing the rule by hand.
+
 ## 1.6.0 (2026-08-21)
 
 ### Fixed
@@ -83,12 +106,6 @@
   The combination to avoid is webpack plus `reactCompiler: true`: `turbopackRustReactCompiler` is Turbopack-only and Next.js refuses to start with it under `--webpack`, so the React Compiler there is Babel's, running before the plugin and renumbering the client tree. Measured in [`examples/nextjs`](examples/nextjs): a 26-line client component reported lines 37, 45 and 54 in the client bundle against a real line 17 in the prerendered markup. Set `position: false` for that combination, on any version.
 
   [`examples/nextjs`](examples/nextjs) now runs under either bundler — `pnpm --filter nextjs dev:webpack` and `build:webpack` alongside the Turbopack scripts.
-
-### Removed
-
-- **`native`**, which emitted `dataSourcePath` because React Native rejects kebab-case props. React Native builds through Metro and Babel, with no SWC in the chain, so the option promised a platform this plugin cannot reach.
-
-  The name it produced is still available as an ordinary value — `{"source-path-attr": "dataSourcePath"}` emits exactly what `native: true` did. A leftover `native` key is ignored rather than rejected, so an unchanged config keeps building; it just gets the default attribute name back.
 
 ### Fixed
 
