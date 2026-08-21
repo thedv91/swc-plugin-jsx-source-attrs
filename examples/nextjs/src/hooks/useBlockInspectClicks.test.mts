@@ -46,7 +46,8 @@ for (const [name, value] of Object.entries({
 
 // Dynamic, so the globals above are in place before React DOM first looks for
 // a document.
-const { act, createElement } = await import("react");
+const { act, createElement, Fragment } = await import("react");
+const { createPortal } = await import("react-dom");
 const { createRoot } = await import("react-dom/client");
 const { useBlockInspectClicks } = await import("./useBlockInspectClicks.ts");
 
@@ -56,18 +57,40 @@ function Probe() {
 }
 
 /**
+ * The shape `Modal.tsx` has, rebuilt with `createElement` because Node strips
+ * types but does not compile JSX: a portal whose overlay closes on click, and
+ * content that stops the click from reaching it. React forwards that
+ * `stopPropagation` to the native event, which is what makes the modal the
+ * case this hook was written for.
+ */
+function ModalProbe({ onClose }: { onClose: () => void }) {
+  return createPortal(
+    createElement(
+      "div",
+      { onClick: onClose, "data-tsd-source": "src/components/Modal.tsx:20:13", id: "overlay" },
+      createElement("p", {
+        onClick: (e: { stopPropagation: () => void }) => e.stopPropagation(),
+        "data-tsd-source": "src/components/Modal.tsx:29:17",
+        id: "content",
+      }),
+    ),
+    window.document.body,
+  );
+}
+
+/**
  * Render the hook, and return the unmount that runs its cleanup.
  *
  * Unmounting is registered on the test rather than left to the caller: a failed
  * assertion aborts the test body, and a listener still on `document` at that
  * point goes on blocking clicks in every test that follows.
  */
-async function mount(t: TestContext) {
+async function mount(t: TestContext, alongside?: ReturnType<typeof createElement>) {
   const container = window.document.createElement("div");
   window.document.body.append(container);
   const root = createRoot(container);
   await act(async () => {
-    root.render(createElement(Probe));
+    root.render(createElement(Fragment, null, createElement(Probe), alongside));
   });
 
   let mounted = true;
@@ -376,6 +399,40 @@ test("swallows a failing launch-editor request", async (t) => {
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(fetched.length, 1);
+});
+
+test("leaves a portal modal working exactly as it did", async (t) => {
+  let closed = 0;
+  await mount(t, createElement(ModalProbe, { onClose: () => (closed += 1) }));
+  const content = window.document.getElementById("content")!;
+  const overlay = window.document.getElementById("overlay")!;
+
+  // Content: React's `stopPropagation` still keeps the click off the overlay.
+  click(content);
+  assert.equal(closed, 0, "clicking the content does not close the modal");
+
+  // Overlay: still closes. The hook returns before touching an unarmed click,
+  // so nothing about the modal changes when the hotkey is not held.
+  click(overlay);
+  assert.equal(closed, 1, "clicking the overlay still closes the modal");
+  assert.deepEqual(fetched, []);
+});
+
+test("does not close the modal out from under an inspect click", async (t) => {
+  let closed = 0;
+  await mount(t, createElement(ModalProbe, { onClose: () => (closed += 1) }));
+  const overlay = window.document.getElementById("overlay")!;
+
+  // The overlay is the one element whose handler would destroy what you are
+  // inspecting -- the whole reason this claims the click in the capture phase
+  // rather than leaving it to the devtools' own bubble-phase listener.
+  press(...DEFAULT_COMBO);
+  click(overlay);
+
+  assert.equal(closed, 0, "the modal is still open");
+  assert.deepEqual(fetched, [
+    "/__nextjs_launch-editor?file=src%2Fcomponents%2FModal.tsx&line1=20&column1=13",
+  ]);
 });
 
 test("stops blocking once unmounted", async (t) => {

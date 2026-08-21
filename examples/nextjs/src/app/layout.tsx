@@ -1,11 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import dynamic from "next/dynamic";
-
-const Devtools = dynamic(() => import("@/components/Devtools"), {
-  ssr: false,
-});
+import Devtools from "@/components/devtools";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,7 +27,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body suppressHydrationWarning className="min-h-full flex flex-col">
         {children}
-        {process.env.NODE_ENV === "development" && <Devtools />}
+        <Devtools />
       </body>
     </html>
   );
