@@ -53,6 +53,24 @@ One config, both bundlers: Turbopack and webpack (`next dev --webpack`, `next bu
 
 ## Options
 
+Every option has a default, so `{}` is a working config. Spelled out, that empty object is:
+
+```jsonc
+{
+  "source-path-attr": "data-source-path",
+  "position": true,
+  "ignore": {
+    "files": [],
+    "components": []
+  }
+  // "root-dir" is unset: the working directory is the root
+}
+```
+
+`root-dir` has no default value to write down — leaving it out means "the directory the build runs in", which is not a string the config can name. Set it only when that directory is not the root you want; see [Monorepos](#monorepos).
+
+Options are read independently, so a config only needs the ones it changes. Two ways a config can quietly do nothing, neither of which fails the build: a key the plugin does not know — `sourcePathAttr` instead of `source-path-attr` — is ignored and that option keeps its default, and a known key given the wrong type — `"position": "false"` — discards the *whole* config back to the defaults above. If an option looks like it is being ignored, read the emitted attribute rather than trusting the config.
+
 - **`source-path-attr`** (string, default: `data-source-path`): Attribute name to emit. Use `data-tsd-source` to match TanStack Devtools exactly.
 
 - **`position`** (boolean, default: `true`): Append the element's own `:line:column`. Columns are counted from 1, the way an editor reports them. Set to `false` to emit the file path alone.
