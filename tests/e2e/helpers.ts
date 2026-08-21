@@ -1,21 +1,21 @@
 import path from "node:path";
-import {transformSync, type Options} from "@swc/core";
+import { transformSync, type Options } from "@swc/core";
 
 export type PluginConfig = Record<string, unknown>;
 
 const pluginPath = path.resolve(
-  "target/wasm32-unknown-unknown/release/swc_plugin_jsx_source_attrs.wasm"
+  "target/wasm32-unknown-unknown/release/swc_plugin_jsx_source_attrs.wasm",
 );
 
 /** Run source through @swc/core with the plugin wired in. */
 export function transform(
   source: string,
   pluginConfig: PluginConfig = {},
-  swcOptions: Pick<Options, "isModule" | "jsc" | "filename"> = {}
+  swcOptions: Pick<Options, "isModule" | "jsc" | "filename"> = {},
 ): string {
   const jsc: NonNullable<Options["jsc"]> = {
-    parser: {syntax: "ecmascript", jsx: true},
-    experimental: {plugins: [[pluginPath, pluginConfig]]},
+    parser: { syntax: "ecmascript", jsx: true },
+    experimental: { plugins: [[pluginPath, pluginConfig]] },
   };
 
   if (swcOptions.jsc?.transform) {
@@ -39,5 +39,17 @@ export function transform(
 
 /** SWC options that enable the automatic runtime + React Compiler. */
 export const reactCompiler: Pick<Options, "jsc"> = {
-  jsc: {transform: {react: {runtime: "automatic"}, reactCompiler: true}},
+  jsc: { transform: { react: { runtime: "automatic" }, reactCompiler: true } },
 };
+
+/** Run source through @swc/core with no plugin — the host on its own. */
+export function swc(
+  source: string,
+  swcOptions: Pick<Options, "jsc"> = {},
+  filename = "tests/e2e/Button.jsx",
+): string {
+  return transformSync(source, {
+    filename: path.resolve(filename),
+    jsc: { parser: { syntax: "typescript", tsx: true }, ...swcOptions.jsc },
+  }).code;
+}

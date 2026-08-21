@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.6.0 (2026-08-21)
+
+### Fixed
+
+- **Columns are counted in characters, not in display width.** `col_display`, which the plugin used, widens a tab to the next tab stop and a CJK character to two cells — so an editor sent to that column landed past the element it was asked to open. A `<div>` after one tab reported column 12; it is at character 9, and now says so.
+
+  This changes emitted positions for any line indented with tabs or containing non-ASCII text before the element. Lines with neither are unaffected, which is most of them.
+
+  It is also what lets the loader below agree with the plugin: a source-level pass has no notion of display width to reproduce.
+
+### Added
+
+- **A loader**, for builds that run the React Compiler — `swc-plugin-jsx-source-attrs/loader`, wired through `turbopack.rules` or an ordinary webpack rule:
+
+  ```ts
+  turbopack: {
+    rules: {"*.tsx": {loaders: [{loader: "swc-plugin-jsx-source-attrs/loader", options: {}}]}},
+  }
+  ```
+
+  It emits the same attribute from the same options, and under the React Compiler it is the only one of the two that can emit a position at all. The plugin runs *after* the host's transforms, and the compiler — one of them — rebuilds the JSX tree with no source spans, so nothing downstream can recover a position; with the compiler on, even `jsxDEV` gets `void 0` for its `source` argument. The loader runs before that, on the source itself, where the position is a plain string literal the rest of the pipeline carries through untouched.
+
+  Measured on a Next.js 16.3 app of ~390 components, `next dev --turbopack` with `reactCompiler: true`, five interleaved rounds: 28 of 28 elements on the route carried a full position, against 2 of 28 for the plugin, and cold compile went from 6.4–6.8 s (plugin) to 4.4–4.8 s. Warm requests and HMR rebuilds were unchanged.
+
+  Text is spliced rather than regenerated, so every element stays on the line it was written at and only columns shift; the incoming source map is passed through as-is.
+
+  `@babel/parser` is now a dependency — the first one this package has had. Only the loader loads it; installing the plugin alone still pulls it in, which is the price of shipping both in one package.
+
+  A `RegExp` in `ignore` is rejected by name instead of crashing the glob matcher: the plugin never sees one — JSON collapses it to `{}` on the way into wasm — but the loader is handed the object itself, so a config ported from TanStack Devtools arrives with the regex intact. A file the parser cannot read (decorators, most obviously — valid syntax needing a plugin the loader does not enable) is passed through unannotated rather than failing the build.
+
+  Both majors are accepted (`^7.29.8 || ^8.0.0`) and both are tested. v8 is ESM-only, and the Node it requires (`^22.18 || >=24.11`) is also the Node that can `require()` an ES module, so this CommonJS loader needs nothing special to load it — it reads `parse` off whatever `require` returns. On a Node too old for that, the loader names the fix (pin `@babel/parser` to `^7`) instead of surfacing `ERR_REQUIRE_ESM`.
+
 ## 1.5.0 (2026-08-21)
 
 ### Changed

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import path from "node:path";
-import {test} from "node:test";
+import { test } from "node:test";
 
-import {reactCompiler, transform} from "./helpers.ts";
+import { reactCompiler, transform } from "./helpers.ts";
 
 const NESTED = `function GameModeNav() {
   return (
@@ -27,14 +27,14 @@ test("annotates every element with file, line and column", () => {
     assert.match(
       code,
       new RegExp(
-        `createElement\\(${tag}, \\{\\s+"data-tsd-source": "tests/e2e/Button\\.jsx:${position}"\\s+\\}`
-      )
+        `createElement\\(${tag}, \\{\\s+"data-tsd-source": "tests/e2e/Button\\.jsx:${position}"\\s+\\}`,
+      ),
     );
   }
 });
 
 test("drops the position when asked", () => {
-  const code = transform(NESTED, {position: false});
+  const code = transform(NESTED, { position: false });
 
   assert.match(code, /"data-tsd-source": "tests\/e2e\/Button\.jsx"/);
   assert.doesNotMatch(code, /Button\.jsx:\d/);
@@ -43,14 +43,14 @@ test("drops the position when asked", () => {
 test("uses a custom attribute name", () => {
   // Any name but `data-tsd-source`, which is the default and would pass here
   // whether or not the option was read.
-  const code = transform(NESTED, {"source-path-attr": "data-source-path"});
+  const code = transform(NESTED, { "source-path-attr": "data-source-path" });
 
   assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx:3:5"/);
   assert.doesNotMatch(code, /data-tsd-source/);
 });
 
 test("takes a camelCase attribute name as written", () => {
-  const code = transform(NESTED, {"source-path-attr": "dataSourcePath"});
+  const code = transform(NESTED, { "source-path-attr": "dataSourcePath" });
 
   assert.match(code, /dataSourcePath: "tests\/e2e\/Button\.jsx:3:5"/);
 });
@@ -91,10 +91,7 @@ function Unrelated() {
   // client agreeing under Turbopack.
   assert.equal((code.match(/data-tsd-source/g) ?? []).length, 3);
   for (const spread of ["props", "rest", "somethingElse"]) {
-    assert.match(
-      code,
-      new RegExp(`"data-tsd-source": "[^"]*"[\\s\\S]{0,80}?${spread}`)
-    );
+    assert.match(code, new RegExp(`"data-tsd-source": "[^"]*"[\\s\\S]{0,80}?${spread}`));
   }
 });
 
@@ -109,10 +106,7 @@ test("does not overwrite an attribute already on the element", () => {
 
   assert.match(code, /"data-tsd-source": "hand-written"/);
   assert.equal((code.match(/data-tsd-source/g) ?? []).length, 2);
-  assert.match(
-    code,
-    /"span", \{\s+"data-tsd-source": "tests\/e2e\/Button\.jsx:4:7"/
-  );
+  assert.match(code, /"span", \{\s+"data-tsd-source": "tests\/e2e\/Button\.jsx:4:7"/);
 });
 
 test("defaults the root to the working directory", () => {
@@ -129,10 +123,7 @@ test("anchors a relative root-dir to the working directory", () => {
     "root-dir": "..",
   });
 
-  assert.match(
-    code,
-    new RegExp(`"data-tsd-source": "${enclosing}/tests/e2e/Button\\.jsx:1:28"`)
-  );
+  assert.match(code, new RegExp(`"data-tsd-source": "${enclosing}/tests/e2e/Button\\.jsx:1:28"`));
 });
 
 test("reads a relative root-dir naming the working directory as that directory", () => {
@@ -186,7 +177,7 @@ export function Card({title}) {
   return <div className="lib-card"><h2>{title}</h2></div>;
 }`,
     {},
-    {filename: "node_modules/some-lib/dist/index.js"}
+    { filename: "node_modules/some-lib/dist/index.js" },
   );
 
   assert.doesNotMatch(code, /data-tsd-source/);
@@ -208,9 +199,13 @@ test("handles Turbopack's virtual project root", () => {
   // Turbopack does not hand plugins filesystem paths; it addresses modules as
   // `[project]/…`. Measuring that against an absolute root rejects every file,
   // which silently disables the plugin under Next.js.
-  const code = transform(`function Card() { return <article />; }`, {}, {
-    filename: "[project]/src/components/Card.tsx",
-  });
+  const code = transform(
+    `function Card() { return <article />; }`,
+    {},
+    {
+      filename: "[project]/src/components/Card.tsx",
+    },
+  );
 
   assert.match(code, /"data-tsd-source": "src\/components\/Card\.tsx:1:26"/);
 });
@@ -218,11 +213,15 @@ test("handles Turbopack's virtual project root", () => {
 test("strips a relative root-dir from a project-relative path", () => {
   // What Next.js 16.3 actually hands the plugin — no `[project]/` prefix, just
   // the path measured from the workspace root
-  const code = transform(`function Card() { return <article />; }`, {
-    "root-dir": "apps/web",
-  }, {
-    filename: "apps/web/src/components/Card.tsx",
-  });
+  const code = transform(
+    `function Card() { return <article />; }`,
+    {
+      "root-dir": "apps/web",
+    },
+    {
+      filename: "apps/web/src/components/Card.tsx",
+    },
+  );
 
   assert.match(code, /"data-tsd-source": "src\/components\/Card\.tsx:1:26"/);
 });
@@ -232,46 +231,67 @@ test("strips a relative root-dir from a virtual path", () => {
   // reports `[project]/apps/web/…`. A relative root-dir is the only form that
   // can drop the workspace prefix — the absolute one names a location the
   // virtual path never reveals.
-  const code = transform(`function Card() { return <article />; }`, {
-    "root-dir": "apps/web",
-  }, {
-    filename: "[project]/apps/web/src/components/Card.tsx",
-  });
+  const code = transform(
+    `function Card() { return <article />; }`,
+    {
+      "root-dir": "apps/web",
+    },
+    {
+      filename: "[project]/apps/web/src/components/Card.tsx",
+    },
+  );
 
   assert.match(code, /"data-tsd-source": "src\/components\/Card\.tsx:1:26"/);
 
   // And a sibling package is outside that root, so it is not project source
-  const sibling = transform(`function Card() { return <article />; }`, {
-    "root-dir": "apps/web",
-  }, {
-    filename: "[project]/packages/ui/src/Card.tsx",
-  });
+  const sibling = transform(
+    `function Card() { return <article />; }`,
+    {
+      "root-dir": "apps/web",
+    },
+    {
+      filename: "[project]/packages/ui/src/Card.tsx",
+    },
+  );
 
   assert.doesNotMatch(sibling, /data-tsd-source/);
 });
 
 test("skips dependencies and bundler code behind a virtual root", () => {
-  const dependency = transform(`function L() { return <span />; }`, {}, {
-    filename: "[project]/node_modules/some-lib/index.js",
-  });
-  const bundler = transform(`function N() { return <span />; }`, {}, {
-    filename: "[next]/dist/client/app.js",
-  });
+  const dependency = transform(
+    `function L() { return <span />; }`,
+    {},
+    {
+      filename: "[project]/node_modules/some-lib/index.js",
+    },
+  );
+  const bundler = transform(
+    `function N() { return <span />; }`,
+    {},
+    {
+      filename: "[next]/dist/client/app.js",
+    },
+  );
 
   assert.doesNotMatch(dependency, /data-tsd-source/);
   assert.doesNotMatch(bundler, /data-tsd-source/);
 });
 
 test("leaves an ignored file alone", () => {
-  const code = transform(`function Spec() { return <div />; }`, {
-    ignore: {files: ["*.test.jsx"]},
-  }, {filename: "tests/e2e/Button.test.jsx"});
+  const code = transform(
+    `function Spec() { return <div />; }`,
+    {
+      ignore: { files: ["*.test.jsx"] },
+    },
+    { filename: "tests/e2e/Button.test.jsx" },
+  );
 
   assert.doesNotMatch(code, /data-tsd-source/);
 });
 
 test("leaves ignored components alone, but not their children", () => {
-  const code = transform(`function App() {
+  const code = transform(
+    `function App() {
   return (
     <Providers>
       <ButtonLazy>
@@ -279,7 +299,9 @@ test("leaves ignored components alone, but not their children", () => {
       </ButtonLazy>
     </Providers>
   );
-}`, {ignore: {components: ["Providers", "*Lazy"]}});
+}`,
+    { ignore: { components: ["Providers", "*Lazy"] } },
+  );
 
   assert.doesNotMatch(code, /"data-tsd-source": "[^"]*:3:5"/);
   assert.doesNotMatch(code, /"data-tsd-source": "[^"]*:4:7"/);
@@ -291,8 +313,19 @@ test("a RegExp in ignore cannot survive the JSON boundary", () => {
   // Documents why the option takes glob strings: SWC serializes the plugin
   // config with JSON.stringify, and a RegExp comes out the other side as {}
   const code = transform(`function App() { return <ButtonLazy />; }`, {
-    ignore: {components: [/.*Lazy$/]},
+    ignore: { components: [/.*Lazy$/] },
   });
 
   assert.match(code, /data-tsd-source/);
+});
+
+test("counts columns in characters, not in display width", () => {
+  // `col_display` widens a tab to the next stop and a CJK character to two
+  // cells, which sends an editor past the element it was asked to open. The
+  // loader counts characters, and the two have to agree.
+  const tabbed = transform("function A() {\n\treturn <div />;\n}");
+  assert.match(tabbed, /"data-tsd-source": "tests\/e2e\/Button\.jsx:2:9"/);
+
+  const wide = transform("function A() {\n  const s = '日本語テキスト'; return <div />;\n}");
+  assert.match(wide, /"data-tsd-source": "tests\/e2e\/Button\.jsx:2:31"/);
 });

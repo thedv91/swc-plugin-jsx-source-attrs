@@ -32,13 +32,22 @@ node --run test:e2e
 
 Drives the real `.wasm` through `@swc/core`, which is the only place the plugin runs the way users run it. Anything involving the host — positions, the working directory, the React Compiler — can only be tested here.
 
+The same command covers `loader/`, the source-level path (`tests/e2e/loader.test.ts`). That half is plain CommonJS and needs no wasm build, so a loader-only change does not need `node --run build` first — but the two are expected to emit the same attribute from the same options, so a change to one usually belongs in both.
+
+The loader supports `@babel/parser` v7 and v8. v7 is what the repository installs; v8 sits alongside it under the `@babel/parser-v8` alias, and `tests/e2e/loader-babel8.test.ts` swaps it in through `loader/parser.js` — the one module that loads the parser, and the seam the loader itself goes through. Anything that touches the AST should be checked against both, because they differ where it matters: v8 renamed the JSX generic node from `typeParameters` to `typeArguments`, and reading the wrong one splices an attribute into the middle of `<Table<Row>>`.
+
 ```bash
+node --run format
 cargo fmt --all
 cargo clippy --all-targets -- -D warnings
 node --run typecheck
 ```
 
-CI runs `cargo fmt -- --check`, `cargo clippy -- -D warnings`, `cargo test`, `typecheck`, `build` and `test:e2e`. Warnings are errors, so run clippy before pushing.
+CI runs `cargo fmt -- --check`, `cargo clippy -- -D warnings`, `format:check`, `cargo test`, `typecheck`, `build` and `test:e2e`. Warnings are errors, so run clippy before pushing.
+
+Prettier owns the JavaScript, TypeScript, JSON and YAML; `cargo fmt` owns the Rust. Two directories are deliberately outside both, and [`.prettierignore`](.prettierignore) says why on each: `tests/fixture/` holds byte-exact snapshots that reformatting breaks, and `examples/` is quoted by line number in the README, so reflowing it invalidates the quote. Markdown is left alone too — Prettier realigns every table it touches, which drowns a one-line documentation change.
+
+`typecheck` covers `loader/` as well as the tests. The loader ships as the JavaScript it is written in, so its types live in JSDoc comments and `checkJs` is what keeps them honest; `loader/index.d.ts` is the public shape and is maintained by hand alongside them.
 
 ## Fixture tests
 

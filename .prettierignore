@@ -1,0 +1,20 @@
+# Snapshots, not source. `output.jsx` is what the plugin emits, byte for byte,
+# and `input.jsx` is the file it was emitted from -- reformatting either one
+# breaks `cargo test` for a reason that looks nothing like formatting.
+tests/fixture/
+
+# Build output and lockfiles.
+target/
+node_modules/
+pnpm-lock.yaml
+*.wasm
+
+# Prose. Prettier reflows tables and list markers, which buries a real
+# documentation change in a diff of realigned pipes; run it by hand on a file
+# if you want it.
+*.md
+
+# The example app is evidence as much as code: README quotes line numbers
+# measured against these files ("a 26-line ClientPanel.tsx reported lines 37,
+# 45 and 54"), and reflowing them silently invalidates the quote.
+examples/

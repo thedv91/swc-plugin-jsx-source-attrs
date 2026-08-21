@@ -1,6 +1,6 @@
 {
   "name": "swc-plugin-jsx-source-attrs",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "SWC plugin that annotates every JSX element with the source file, line and column it was written at",
   "author": "Harry <thedv91@gmail.com>",
   "license": "MIT",
@@ -17,6 +17,8 @@
     "build": "cargo build --release --target wasm32-unknown-unknown",
     "test": "cargo test",
     "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test:e2e": "node --test tests/e2e/*.test.ts",
     "prepack": "pnpm build && cp -rf target/wasm32-unknown-unknown/release/swc_plugin_jsx_source_attrs.wasm .",
     "release": "npm publish"
@@ -24,6 +26,7 @@
   "main": "swc_plugin_jsx_source_attrs.wasm",
   "files": [
     "CHANGELOG.md",
+    "loader",
     "src",
     "swc_plugin_jsx_source_attrs.wasm"
   ],
@@ -36,8 +39,11 @@
     "url": "https://github.com/thedv91/swc-plugin-jsx-source-attrs/issues"
   },
   "devDependencies": {
+    "@babel/parser-v8": "npm:@babel/parser@^8.0.4",
+    "@babel/types": "^8.0.4",
     "@swc/core": "1.15.43",
     "@types/node": "26.1.1",
+    "prettier": "^3.9.6",
     "typescript": "7.0.2"
   },
   "packageManager": "pnpm@11.22.0",
@@ -48,5 +54,8 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "@babel/parser": "^7.29.8 || ^8.0.0"
   }
 }

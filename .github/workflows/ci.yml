@@ -68,6 +68,7 @@ jobs:
         run: |
           cargo fmt -- --check
           cargo clippy -- -D warnings
+          node --run format:check
 
       - name: test
         run: |

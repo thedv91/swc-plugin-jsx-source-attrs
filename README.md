@@ -20,9 +20,12 @@ That is the whole plugin. One attribute, one job: given an element in the browse
 
 This is a port of the `data-tsd-source` injection in [@tanstack/devtools](https://tanstack.com/devtools), which does the same thing for Vite. If you already build with Vite you do not need this; it exists for toolchains built on SWC (Next.js, Rspack, Nx, plain `@swc/core`) — including as the source of the attribute TanStack's own devtools read, see [TanStack Devtools](#tanstack-devtools).
 
+It ships two ways to do that one job: the **SWC plugin**, and a **loader** for builds that run the React Compiler, which strips the positions out from under any plugin. Same attribute, same options — [which to use](#the-loader--for-builds-with-the-react-compiler).
+
 ## Contents
 
 - [Installation](#installation) · [Usage](#usage) · [Compatibility](#compatibility) · [Options](#options)
+- [The loader — for builds with the React Compiler](#the-loader--for-builds-with-the-react-compiler)
 - [Monorepos](#monorepos) · [Project files only](#project-files-only) · [What else is skipped](#what-else-is-skipped)
 - [TanStack Devtools](#tanstack-devtools) — click-to-source under Next.js
 - [Known limitation: the React Compiler](#known-limitation-the-react-compiler)
@@ -101,6 +104,75 @@ export default {
 
 Rspack caches compiled wasm plugins under `.swc/` in the project; `jsc.experimental.cacheRoot` moves it.
 
+## The loader — for builds with the React Compiler
+
+If your build runs the **React Compiler**, use the loader instead of the plugin. Same attribute, same options, different point in the pipeline — and it is the only one of the two that can report a position there.
+
+The reason is structural, not a bug to be fixed: an SWC plugin runs *after* the host's own transforms, the React Compiler is one of them, and it rebuilds the JSX tree with no source spans attached. By the time the plugin is asked, the position is already gone — so it emits the bare path (see [the limitation](#known-limitation-the-react-compiler)). The loader runs before any of that, on the source itself, where the position becomes an ordinary string literal that every later transform carries through untouched.
+
+**Turbopack** (`next dev`, `next build --turbopack`):
+
+```ts
+// next.config.ts
+const nextConfig: NextConfig = {
+  turbopack: {
+    rules: {
+      "*.tsx": {
+        loaders: [
+          {
+            loader: "swc-plugin-jsx-source-attrs/loader",
+            options: {},
+          },
+        ],
+      },
+    },
+  },
+};
+```
+
+**webpack** — same loader, ordinary rule:
+
+```js
+module.exports = {
+  module: {
+    rules: [
+      {
+        test: /\.[jt]sx$/,
+        exclude: /node_modules/,
+        use: {loader: "swc-plugin-jsx-source-attrs/loader", options: {}},
+      },
+    ],
+  },
+};
+```
+
+Drop the `swcPlugins` entry when you switch: keeping both is one wasted pass over every file, since the second one to run finds the attribute already there and leaves the element alone.
+
+### What it costs
+
+Measured on a Next.js 16.3 app of ~390 components, `next dev --turbopack` with `reactCompiler: true`, five interleaved rounds, cold compile of one route:
+
+| | cold compile | elements carrying a position |
+| --- | --- | --- |
+| neither | 5.1–5.5 s | — |
+| plugin | 6.4–6.8 s | 2 of 28 |
+| loader | 4.4–4.8 s | **28 of 28** |
+
+Warm requests (~95 ms) and HMR rebuilds (~75 ms) were identical in all three. The loader parses each file once more with `@babel/parser` — the only runtime dependency this package has, and only the loader pulls it in — which is cheaper than it sounds next to what SWC then does with the file.
+
+**Either major of `@babel/parser` works**, v7 or v8, and both are tested. v8 is ESM-only and requires Node ^22.18 || >=24.11 — which is also the Node that can `require()` an ES module, so nothing else is needed to use it from this CommonJS loader. On an older runtime, pin `@babel/parser` to `^7`; the loader says so by name rather than failing with `ERR_REQUIRE_ESM`.
+
+The loader also came out *faster than instrumenting nothing at all*, consistently across rounds. That is not explained, and is not a claim to plan around; read the table as "the loader does not cost you anything measurable", not as a speed-up.
+
+### What it does not do
+
+- **Source map columns shift.** Text is spliced in, so every element stays on the line it was written at and line numbers remain exact — but columns after an insertion move by the length of the attribute, and the incoming map is passed through unchanged. Lines are what an editor jumps to; columns are what a stack trace points at.
+- **It only sees what the rule matches.** The Turbopack example above covers `*.tsx`; add `*.jsx`, `*.js`, `*.mjs` or `*.cjs` if you write JSX in those. `.ts` is refused even if a rule names it: with the JSX parser plugin on, `<T>(x) => x` reads as an unclosed element rather than a generic arrow. The plugin, sitting inside SWC, sees every module the bundler compiles.
+
+- **A file it cannot parse is passed through.** `errorRecovery` covers what Babel can recover from, but valid syntax needing a plugin the loader does not enable — decorators, most obviously — throws out of the parser. That file goes through unannotated rather than failing the build, which is the bundler's call to make.
+
+- **A `RegExp` in `ignore` is an error, not a no-op.** The plugin never sees one — a config crossing into wasm as JSON has already lost it. The loader is handed the object itself, so a config ported from TanStack Devtools arrives with the regex intact and the loader says so by name. Rewrite them as globs.
+
 ## Compatibility
 
 | | |
@@ -131,11 +203,13 @@ Every option has a default, so `{}` is a working config. Spelled out, that empty
 
 `root-dir` has no default value to write down — leaving it out means "the directory the build runs in", which is not a string the config can name. Set it only when that directory is not the root you want; see [Monorepos](#monorepos).
 
+[The loader](#the-loader--for-builds-with-the-react-compiler) takes this same object, spelled the same way, so switching between them is a change of wiring and not of config. One difference in how they are read: the loader receives a JavaScript object rather than JSON, and reads each key on its own — so `"position": "false"` leaves that one option wrong (a non-empty string is truthy) instead of discarding the whole config back to the defaults, which is what the plugin does with it.
+
 Options are read independently, so a config only needs the ones it changes. Two ways a config can quietly do nothing, neither of which fails the build: a key the plugin does not know — `sourcePathAttr` instead of `source-path-attr` — is ignored and that option keeps its default, and a known key given the wrong type — `"position": "false"` — discards the *whole* config back to the defaults above. If an option looks like it is being ignored, read the emitted attribute rather than trusting the config.
 
 - **`source-path-attr`** (string, default: `data-tsd-source`): Attribute name to emit. The default is the name the TanStack Devtools source inspector reads, so `{}` works with it unchanged — see [TanStack Devtools](#tanstack-devtools). Set this only for a consumer that reads some other name.
 
-- **`position`** (boolean, default: `true`): Append the element's own `:line:column`. Columns are counted from 1, the way an editor reports them. Set to `false` to emit the file path alone.
+- **`position`** (boolean, default: `true`): Append the element's own `:line:column`. Columns count **characters** from 1 — a tab is one character and a CJK character is one character, which is what an editor asked to jump there counts too, and what keeps the plugin and the loader agreeing on the same element. Set to `false` to emit the file path alone.
 
 - **`ignore`** (object, default: none): Project source to leave alone.
 
@@ -369,11 +443,15 @@ A Client Component compiled by the React Compiler carries the bare path with no 
 
 Everything below has one root cause. An SWC plugin cannot choose where it sits in the transform chain — it runs *after* the host's own transforms. So it never sees your source; it sees whatever the host has already done to it.
 
+**The way out is [the loader](#the-loader--for-builds-with-the-react-compiler)**, which sits before the chain instead of after it and keeps full positions under the React Compiler. The rest of this section is what happens if you use the plugin there anyway.
+
 ### Positions are lost with the React Compiler
 
 With `jsc.transform.reactCompiler` enabled, the attribute is still emitted, but as the bare file path with no `:line:column`.
 
 The React Compiler rebuilds the JSX tree with no source spans attached, so there is nothing left to resolve a position from. The plugin detects this and emits the path alone; without that check the host panics with `NoFileFor(BytePos(0))` and the build dies.
+
+It goes further than the plugin: with the compiler on, even `jsxDEV` receives `void 0` where its `source` argument would go, so React's own devtools lose the location too. Nothing downstream of the compiler can recover a position — which is why the fix has to be upstream of it.
 
 ### Next.js before 16.3: set `position: false`
 

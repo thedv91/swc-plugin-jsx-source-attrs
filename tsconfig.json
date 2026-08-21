@@ -12,7 +12,18 @@
     "erasableSyntaxOnly": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    // `loader/` ships as the JavaScript it is written in -- no build step, so
+    // what is published is what is reviewed. Its types come from JSDoc, and
+    // `checkJs` is what makes those annotations load-bearing rather than
+    // decorative.
+    "allowJs": true,
+    "checkJs": true
   },
-  "include": ["tests/e2e/**/*.ts"]
+  // `loader/**/*.d.ts` is deliberately absent. A declaration file sitting next
+  // to a JavaScript file of the same name shadows it -- listing both silently
+  // dropped `loader/index.js` from the program, so nothing in it was checked at
+  // all. `loader/index.d.ts` is still compiled, through the `import type` in
+  // `tests/e2e/loader-helpers.ts`.
+  "include": ["tests/e2e/**/*.ts", "loader/**/*.js"]
 }

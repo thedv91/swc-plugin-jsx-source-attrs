@@ -149,8 +149,12 @@ impl JsxSourceAttrsVisitor {
         let loc = source_map.lookup_char_pos(span.lo);
         Some(Str {
             span: DUMMY_SP,
-            // `col_display` is 0-based; editors count columns from 1.
-            value: format!("{}:{}:{}", path, loc.line, loc.col_display + 1).into(),
+            // `col` counts characters and is 0-based; editors count characters
+            // from 1. Not `col_display`, which counts *columns on screen* — it
+            // widens a tab to the next stop and a CJK character to two, so an
+            // editor sent there lands past the element. It is also what the
+            // loader cannot reproduce, and the two have to agree.
+            value: format!("{}:{}:{}", path, loc.line, loc.col.0 + 1).into(),
             raw: None,
         })
     }
