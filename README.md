@@ -14,7 +14,7 @@ An SWC plugin that stamps every JSX element with the file, line and column it wa
 
 That is the whole plugin. One attribute, one job: given an element in the browser, tell me the line of source that produced it — the foundation for click-to-source, element inspectors and overlay devtools.
 
-This is a port of the `data-tsd-source` injection in [@tanstack/devtools](https://tanstack.com/devtools), which does the same thing for Vite. If you already use TanStack Devtools you do not need this; it exists for toolchains built on SWC (Next.js, Rspack, Nx, plain `@swc/core`).
+This is a port of the `data-tsd-source` injection in [@tanstack/devtools](https://tanstack.com/devtools), which does the same thing for Vite. If you already build with Vite you do not need this; it exists for toolchains built on SWC (Next.js, Rspack, Nx, plain `@swc/core`) — including as the source of the attribute TanStack's own devtools read, see [TanStack Devtools](#tanstack-devtools).
 
 ## Installation
 
@@ -154,6 +154,155 @@ The library's internal `<button>` gets nothing, so the innermost annotated eleme
 - **Fragments** — `<>`, `<Fragment>` and `<React.Fragment>` emit no host node, so there is nothing to hang an attribute on. Their children are still annotated.
 - **Elements that spread the enclosing props** — `function Wrapper(props) { return <div {...props} /> }`. The spread already forwards whatever the caller annotated; appending here would overwrite the caller's real position with the wrapper's.
 - **Elements that already have the attribute** — written by hand, or by an earlier pass over the same file.
+
+## TanStack Devtools
+
+The devtools' [source inspector](https://tanstack.com/devtools/latest/docs/source-inspector) — hold the hotkey, hover to highlight, click to open the file — is a Vite plugin's feature, but the client half of it is plain DOM code. Point this plugin at the attribute it reads, route the one endpoint it calls, and it works under Next.js — with no route handler and no extra dependency. Verified end to end in [`examples/nextjs`](examples/nextjs) on Next.js 16.3.1 with `@tanstack/react-devtools` 0.10.11.
+
+### Setup
+
+**1.** Install the devtools alongside this plugin:
+
+```bash
+npm install --save-dev @tanstack/react-devtools swc-plugin-jsx-source-attrs
+```
+
+**2.** `next.config.ts` — the attribute name, and a redirect for the endpoint the devtools call on click:
+
+```ts
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  experimental: {
+    swcPlugins: [
+      [
+        "swc-plugin-jsx-source-attrs",
+        {
+          "source-path-attr": "data-tsd-source",
+          // Only needed when `next dev` does not run from the directory you
+          // want paths relative to -- a monorepo package, typically.
+          // "root-dir": "apps/web",
+        },
+      ],
+    ],
+  },
+  async redirects() {
+    if (process.env.NODE_ENV !== "development") return [];
+    return [
+      {
+        source: "/__tsd/open-source",
+        permanent: false,
+        has: [
+          {
+            type: "query",
+            key: "source",
+            value: "(?<file>.+):(?<line>\\d+):(?<column>\\d+)",
+          },
+        ],
+        destination:
+          "/__nextjs_launch-editor?file=:file&line1=:line&column1=:column",
+      },
+      // Positionless fallback -- see "What does not survive" below. Must come
+      // second: its pattern also matches a positioned value, first match wins.
+      {
+        source: "/__tsd/open-source",
+        permanent: false,
+        has: [{ type: "query", key: "source", value: "(?<file>.+)" }],
+        destination: "/__nextjs_launch-editor?file=:file",
+      },
+    ];
+  },
+};
+
+export default nextConfig;
+```
+
+**3.** `src/components/Devtools.tsx` — a Client Component that only exists in dev:
+
+```tsx
+"use client";
+
+import dynamic from "next/dynamic";
+
+const TanStackDevtools =
+  process.env.NODE_ENV === "development"
+    ? dynamic(
+        () => import("@tanstack/react-devtools").then((m) => m.TanStackDevtools),
+        { ssr: false },
+      )
+    : () => null;
+
+export function Devtools() {
+  return <TanStackDevtools />;
+}
+```
+
+**4.** Mount it once in the root layout:
+
+```tsx
+// src/app/layout.tsx
+import { Devtools } from "@/components/Devtools";
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="en">
+      <body>
+        {children}
+        <Devtools />
+      </body>
+    </html>
+  );
+}
+```
+
+**5.** Start `next dev` and check the two halves separately, because both fail silently:
+
+```bash
+# the attribute is being emitted
+curl -s http://localhost:3000/ | grep -o 'data-tsd-source="[^"]*"' | head -3
+
+# the endpoint resolves -- this opens the file in your editor
+curl -sL -o /dev/null -w '%{http_code}\n' \
+  'http://localhost:3000/__tsd/open-source?source=src%2Fapp%2Fpage.tsx%3A1%3A1'
+```
+
+The first should print paths like `src/app/page.tsx:8:5`, the second `204`. Then hold **Shift+Alt+Ctrl** (Shift+Alt+Cmd on macOS) and hover: elements outline, with their source path on a label above. Click one and it opens.
+
+Each of those pieces fails differently if it is missing, and none of them fails loudly.
+
+### The attribute name
+
+`data-tsd-source` is hardcoded in the inspector, not configurable on their side. Leave the default `data-source-path` and nothing highlights — which reads as a dead hotkey, because the hotkey has no other visible effect. The inspector also does not walk up the tree: it reads the attribute off the topmost element under the cursor and gives up if it is absent, so anything this plugin skips (see [What else is skipped](#what-else-is-skipped)) is a hole in the overlay rather than a hit on its parent.
+
+`root-dir` has to name the directory `next dev` runs in, because a relative path in the attribute is resolved against the project root when the file is opened. Under Turbopack the default root is the repo, so a monorepo package needs this set or the editor is sent to `<cwd>/apps/web/apps/web/…`. See [Monorepos](#monorepos).
+
+### Keeping the devtools out of production
+
+The `NODE_ENV` test in step 3 is the part that matters, not the `dynamic()` call. `@tanstack/react-devtools` carries no production guard of its own — under Vite the plugin's `removeDevtoolsOnBuild` strips it, and nothing does that job here. Imported plainly, it ships: `next build` on [`examples/nextjs`](examples/nextjs) put a 211 KB client chunk in the bundle. Behind the test the import is never reached, and the same build drops from 876 KB of client chunks to 612 KB with no `@tanstack/devtools` code left in `.next` at all.
+
+### Why the endpoint is a redirect
+
+Clicking a highlighted element fetches `/__tsd/open-source?source=path:line:column`, which the Vite plugin answers as dev-server middleware. Next has no equivalent hook, and the client swallows the failure — the fetch is `.catch(() => {})`, so a missing endpoint is indistinguishable from a click that did nothing.
+
+It does not need a route handler of your own, though. Next's dev overlay already runs `/__nextjs_launch-editor`, which does exactly this job; the only mismatch is that TanStack packs the position into one param and Next wants three. The `has` matcher in step 2 splits it with named capture groups, and the whole thing stays in `next.config.ts`.
+
+A **redirect**, not a rewrite. `__nextjs_launch-editor` is served by dev middleware that runs ahead of the router, so a rewritten URL never reaches it — that form returns 404. The 307 makes the browser issue a second, real request, which does; `fetch` follows it without being asked. Next resolves a relative `file` against the project root, so this needs the same `root-dir` as everything else.
+
+The `NODE_ENV` guard keeps it out of the production routes manifest, where it would only ever 404: `__nextjs_launch-editor` is dev-only. Nothing else is added to the app, so there is no route handler to compile into a build, and no `launch-editor` dependency.
+
+If you would rather write the endpoint yourself — to reach an editor Next cannot launch, or to do something other than open a file — an app-router handler plus a `rewrites()` entry works too. Note that `__tsd` cannot be the folder name: Next treats a leading underscore as marking a folder private and opts it out of routing entirely, so the handler has to live elsewhere and be rewritten to.
+
+### The hotkey rejects extra keys
+
+Hold **Shift+Alt+Ctrl** (or Shift+Alt+Cmd). The check is an equality, not a subset — the set of keys held has to match `inspectHotkey` exactly, so a fourth modifier resting under a finger cancels the whole thing silently. Holding all four modifiers leaves the cursor unchanged; releasing one brings the overlay straight back.
+
+`inspectHotkey` and `sourceAction` are configurable on `<TanStackDevtools config={...} />`, but only as the *initial* state — after the first run they live in `localStorage` and change through the Settings tab. Editing the code alone will not move a hotkey that has already been persisted.
+
+### What does not survive
+
+A Client Component compiled by the React Compiler carries the bare path with no `:line:column` — see [the limitation below](#positions-are-lost-with-the-react-compiler). TanStack's own handler drops those requests: its parser requires both numbers and returns nothing without them. The second redirect above is why they still open here, at line 1, which is also what you get from `position: false`.
+
+`sourceAction: "copy-path"` sidesteps the endpoint altogether — the click copies `path:line:column` to the clipboard and never touches the network. Worth knowing if wiring up a route handler is more than the feature is worth to you.
 
 ## Known limitation: the React Compiler
 
