@@ -1,35 +1,37 @@
 "use client";
 
-import dynamic from "next/dynamic";
+import { TanStackDevtools } from "@tanstack/react-devtools";
 import { useEffect } from "react";
 
-// The devtools shell reads `data-tsd-source` off the hovered element, so the
-// plugin has to be configured to emit that name -- see `source-path-attr` in
-// next.config.ts.
-//
-// `@tanstack/react-devtools` has no production guard of its own -- the Vite
-// plugin's `removeDevtoolsOnBuild` is what normally strips it, and nothing does
-// that job under Next. Imported statically it lands in the production bundle
-// (measured: a 211 KB client chunk). Behind a `NODE_ENV` test the import is
-// never reached, so the bundler drops it.
-const TanStackDevtools =
-  process.env.NODE_ENV === "development"
-    ? dynamic(
-        () =>
-          import("@tanstack/react-devtools").then((m) => m.TanStackDevtools),
-        { ssr: false },
-      )
-    : () => null;
+const DEFAULT_INSPECT_HOTKEY = ["Shift", "Alt", "CtrlOrMeta"];
 
-// Mirrors the devtools' default `inspectHotkey`, `['Shift', 'Alt', 'CtrlOrMeta']`.
+// The hotkey is whatever the devtools' settings panel last wrote, so changing it
+// there has to change it here too -- otherwise the blocker stays asleep while the
+// inspector highlights, and the click dies in the first modal that stops
+// propagation. Read per click rather than cached: the panel writes this key on
+// every edit, with no reload in between.
+function inspectHotkey(): Array<string> {
+  try {
+    const settings = localStorage.getItem("tanstack_devtools_settings");
+    const keys = settings ? JSON.parse(settings).inspectHotkey : null;
+    return Array.isArray(keys) && keys.length > 0 ? keys : DEFAULT_INSPECT_HOTKEY;
+  } catch {
+    return DEFAULT_INSPECT_HOTKEY;
+  }
+}
+
 // Tracked from key events rather than read off the click, because a click
 // synthesized without real modifier state carries none of these flags.
+//
+// Mirrors `isHotkeyCombinationPressed`: every key in the combo must be held and
+// nothing beyond it, so a fourth key cancels the inspect just as it does for the
+// devtools. `CtrlOrMeta` stands for either key, hence the two variants.
 function isInspecting(held: Set<string>) {
-  return (
-    held.has("Shift") &&
-    held.has("Alt") &&
-    (held.has("Control") || held.has("Meta"))
-  );
+  const pressed = new Set([...held].map((key) => key.toUpperCase()));
+  return ["CONTROL", "META"].some((either) => {
+    const combo = inspectHotkey().map((key) => (key === "CtrlOrMeta" ? either : key.toUpperCase()));
+    return combo.length === pressed.size && combo.every((key) => pressed.has(key));
+  });
 }
 
 /**
@@ -50,7 +52,7 @@ function isInspecting(held: Set<string>) {
 function useBlockInspectClicks() {
   useEffect(() => {
     // Without this the listeners would still be installed in production, where
-    // Shift+Alt+Ctrl and a click would swallow the click for nothing.
+    // the hotkey and a click would swallow the click for nothing.
     if (process.env.NODE_ENV !== "development") return;
 
     const held = new Set<string>();
@@ -70,21 +72,28 @@ function useBlockInspectClicks() {
       e.stopPropagation();
 
       if (!source) return;
-      fetch(`/__tsd/open-source?source=${encodeURIComponent(source)}`).catch(
-        () => {},
-      );
+      // Straight to Next's dev overlay, skipping the `/__tsd/open-source`
+      // redirects. It reads `file`, `line1` and `column1` as separate params and
+      // answers 400 to the packed one the devtools would send, so the split
+      // happens here. Positionless is the live case, not a guard: a Client
+      // Component under the React Compiler emits the bare path.
+      const at = /^(.*):(\d+):(\d+)$/.exec(source);
+      const params = at
+        ? new URLSearchParams({ file: at[1], line1: at[2], column1: at[3] })
+        : new URLSearchParams({ file: source });
+      fetch(`/__nextjs_launch-editor?${params}`).catch(() => {});
     };
 
-    addEventListener("keydown", onKeyDown, true);
-    addEventListener("keyup", onKeyUp, true);
+    addEventListener("keydown", onKeyDown, { capture: true });
+    addEventListener("keyup", onKeyUp, { capture: true });
     addEventListener("blur", onBlur);
-    document.addEventListener("click", onClick, true);
+    document.addEventListener("click", onClick, { capture: true });
 
     return () => {
-      removeEventListener("keydown", onKeyDown, true);
-      removeEventListener("keyup", onKeyUp, true);
+      removeEventListener("keydown", onKeyDown, { capture: true });
+      removeEventListener("keyup", onKeyUp, { capture: true });
       removeEventListener("blur", onBlur);
-      document.removeEventListener("click", onClick, true);
+      document.removeEventListener("click", onClick, { capture: true });
     };
   }, []);
 }

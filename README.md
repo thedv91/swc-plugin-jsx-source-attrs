@@ -202,11 +202,11 @@ Without the React Compiler, webpack needs no workaround at all — server and cl
 
 ## TanStack Devtools
 
-The devtools' [source inspector](https://tanstack.com/devtools/latest/docs/source-inspector) — hold the hotkey, hover to highlight, click to open the file — is a Vite plugin's feature, but its client half is plain DOM code. Feed it this attribute, route the one endpoint it calls, and it works under Next.js with no route handler and no extra dependency. Verified end to end in [`examples/nextjs`](examples/nextjs) on Next.js 16.3.1 with `@tanstack/react-devtools` 0.10.11.
+The devtools' [source inspector](https://tanstack.com/devtools/latest/docs/source-inspector) — hold the hotkey, hover to highlight, click to open the file — is a Vite plugin's feature, but its client half is plain DOM code. Feed it this attribute, point its one request at the dev overlay's editor endpoint, and it works under Next.js with no route handler and no extra dependency. Verified end to end in [`examples/nextjs`](examples/nextjs) on Next.js 16.3.1 with `@tanstack/react-devtools` 0.10.11.
 
 **1.** Wire the attribute in — [plugin](#plugin) or [loader](#loader), no `source-path-attr` needed since the default is the name the inspector reads.
 
-**2.** Route the endpoint in `next.config.ts`:
+**2.** Route the endpoint in `next.config.ts`. Needed only if the devtools' own click handler is the one calling out — the blocker [below](#taking-the-click-over) calls `__nextjs_launch-editor` itself and never touches this path:
 
 ```ts
 async redirects() {
@@ -251,20 +251,122 @@ export function Devtools() {
 
 ```bash
 curl -s http://localhost:3000/ | grep -o 'data-tsd-source="[^"]*"' | head -3
+curl -s -o /dev/null -w '%{http_code}\n' \
+  'http://localhost:3000/__nextjs_launch-editor?file=src%2Fapp%2Fpage.tsx&line1=1&column1=1'
+# only with the redirects from step 2:
 curl -sL -o /dev/null -w '%{http_code}\n' \
   'http://localhost:3000/__tsd/open-source?source=src%2Fapp%2Fpage.tsx%3A1%3A1'
 ```
 
 Paths like `src/app/page.tsx:8:5`, then `204`. Now hold **Shift+Alt+Ctrl** (Shift+Alt+Cmd on macOS), hover, and click.
 
-Everything here fails quietly, so the four things that actually go wrong:
+The status code names the failure: **400** no `file` param · **404** the path resolved against the project directory does not exist, so check `root-dir` · **500** the editor spawn threw · **204** Next called the editor. Only `file` is required — `line1` and `column1` go through `parseInt(… ?? "0") || undefined`, so absent, `0` and garbage alike just open the file at line 1. Note that 204 does not promise a window actually appeared: `launchEditor` spawns asynchronously, and a child that dies is not reported back.
+
+Everything here fails quietly, so the six things that actually go wrong:
 
 - **The hotkey is an equality, not a subset.** A fourth modifier resting under a finger cancels it with no visible effect at all. `inspectHotkey` is configurable on `<TanStackDevtools config={...} />`, but only as *initial* state — after the first run it lives in `localStorage` and moves through the Settings tab.
 - **The attribute name is hardcoded** in the inspector. Point `source-path-attr` elsewhere and nothing highlights, which reads as a dead hotkey.
 - **The inspector does not walk up the tree.** It reads the attribute off the topmost element under the cursor and gives up if it is absent, so anything [skipped](#what-is-skipped) is a hole in the overlay rather than a hit on its parent.
-- **A redirect, not a rewrite.** `__nextjs_launch-editor` is served by dev middleware that runs ahead of the router, so a rewritten URL never reaches it and 404s. The 307 makes the browser issue a second, real request; `fetch` follows it unasked. `root-dir` has to name the directory `next dev` runs in, since a relative path is resolved against the project root when the file is opened.
+- **`root-dir` has to name the directory `next dev` runs in.** A relative `file` is resolved against the project directory when it is opened, so a mismatch is the 404 above — on either route.
+- **If you do route through `/__tsd/open-source`, it has to be a redirect, not a rewrite.** `__nextjs_launch-editor` is served by dev middleware that runs ahead of the router, so a rewritten URL never reaches it and 404s. The 307 makes the browser issue a second, real request; `fetch` follows it unasked.
+- **The inspect click reaches the app too — and inside a modal it reaches nothing else.** See below; this one costs about forty lines to fix.
 
 `sourceAction: "copy-path"` sidesteps the endpoint entirely — the click copies `path:line:column` to the clipboard and never touches the network.
+
+### Taking the click over
+
+The inspector listens on `document` in the **bubble** phase. Two things follow, and the second is the one that looks like a broken build:
+
+- React has already dispatched `onClick` by then, so inspecting a `<button>` fires its handler and inspecting a `<Link>` navigates, on the way to opening the file. Their `preventDefault()` only cancels the browser's default action.
+- Anything that stops propagation on the way up eats the click entirely. That is every portal modal that guards against click-outside — measured in [`examples/nextjs`](examples/nextjs) with real mouse and key input:
+
+  | modal content | click capture (document) | click bubble (document) | request sent |
+  | --- | --- | --- | --- |
+  | `onClick={(e) => e.stopPropagation()}` | runs | **never runs** | none |
+  | no `stopPropagation` | runs | runs | opens the file, and closes the modal |
+
+Claiming the click in the capture phase stops React, but it also stops the event before the inspector's own listener sees it — verified, the file no longer opens. So take the click over completely and repeat the one thing that handler does:
+
+```tsx
+import {useEffect} from "react";
+
+const DEFAULT_INSPECT_HOTKEY = ["Shift", "Alt", "CtrlOrMeta"];
+
+// Whatever the Settings tab last wrote. Read per click, not cached: the panel
+// writes this key on every edit, with no reload in between.
+function inspectHotkey(): Array<string> {
+  try {
+    const settings = localStorage.getItem("tanstack_devtools_settings");
+    const keys = settings ? JSON.parse(settings).inspectHotkey : null;
+    return Array.isArray(keys) && keys.length > 0 ? keys : DEFAULT_INSPECT_HOTKEY;
+  } catch {
+    return DEFAULT_INSPECT_HOTKEY;
+  }
+}
+
+// Held keys are tracked from key events rather than read off the click, because
+// the modifier flags on a synthesized click carry none of this. The comparison
+// mirrors the devtools': every key in the combo, and nothing beyond it.
+function isInspecting(held: Set<string>) {
+  const pressed = new Set([...held].map((key) => key.toUpperCase()));
+  return ["CONTROL", "META"].some((either) => {
+    const combo = inspectHotkey().map((key) => (key === "CtrlOrMeta" ? either : key.toUpperCase()));
+    return combo.length === pressed.size && combo.every((key) => pressed.has(key));
+  });
+}
+
+export function useBlockInspectClicks() {
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+
+    const held = new Set<string>();
+    const onKeyDown = (e: KeyboardEvent) => held.add(e.key);
+    const onKeyUp = (e: KeyboardEvent) => held.delete(e.key);
+    // Modifiers released while the tab is unfocused never emit a keyup, which
+    // would leave this armed against ordinary clicks.
+    const onBlur = () => held.clear();
+
+    const onClick = (e: MouseEvent) => {
+      if (!isInspecting(held)) return;
+
+      // `elementFromPoint`, no ancestor walk — the same way the inspector reads
+      // it, so what opens is what was highlighted.
+      const source = document.elementFromPoint(e.clientX, e.clientY)?.getAttribute("data-tsd-source");
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (!source) return;
+      // Straight to the dev overlay: it reads the position as separate params
+      // and answers 400 to the packed one, so the split happens here. The
+      // positionless branch is live, not a guard — a Client Component under the
+      // React Compiler emits the bare path.
+      const at = /^(.*):(\d+):(\d+)$/.exec(source);
+      const params = at
+        ? new URLSearchParams({file: at[1], line1: at[2], column1: at[3]})
+        : new URLSearchParams({file: source});
+      fetch(`/__nextjs_launch-editor?${params}`).catch(() => {});
+    };
+
+    addEventListener("keydown", onKeyDown, {capture: true});
+    addEventListener("keyup", onKeyUp, {capture: true});
+    addEventListener("blur", onBlur);
+    document.addEventListener("click", onClick, {capture: true});
+
+    return () => {
+      removeEventListener("keydown", onKeyDown, {capture: true});
+      removeEventListener("keyup", onKeyUp, {capture: true});
+      removeEventListener("blur", onBlur);
+      document.removeEventListener("click", onClick, {capture: true});
+    };
+  }, []);
+}
+```
+
+Call it from the same component that mounts the panel. Two things worth knowing before you paste it:
+
+- **It swallows every click that matches the hotkey**, so a one-key `inspectHotkey` of `CtrlOrMeta` also swallows Cmd+click to open a link in a new tab. `Alt` collides with less.
+- **It reads devtools internals** — the `localStorage` key, the attribute name, the endpoint — none of which are a public contract. It exists only because the listener is on the bubble phase; if that ever moves to capture upstream, delete the whole thing.
 
 ## Compatibility
 

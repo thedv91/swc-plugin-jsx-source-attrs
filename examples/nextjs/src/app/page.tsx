@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Card } from "@/components/Card";
 import { ClientPanel } from "@/components/ClientPanel";
+import { Modal } from "@/components/Modal";
 import { Spread } from "@/components/Spread";
 
 export default function Home() {
@@ -30,19 +31,21 @@ export default function Home() {
 
       <Card title="Props spread">
         <Spread className="italic">
-          this paragraph keeps the position of the <code>&lt;Spread&gt;</code>{" "}
-          call site, not the one inside the component
+          this paragraph keeps the position of the <code>&lt;Spread&gt;</code> call site, not the
+          one inside the component
         </Spread>
       </Card>
 
       <Card title="Client component">
-        <ClientPanel>
-          a hydrated element: server and client must agree on the attribute
-        </ClientPanel>
+        <ClientPanel>a hydrated element: server and client must agree on the attribute</ClientPanel>
       </Card>
 
       <Card title="Hand-written attribute">
         <em data-tsd-source="written-by-hand">an existing value is preserved</em>
+      </Card>
+
+      <Card title="Portal modal">
+        <Modal />
       </Card>
 
       <Card title="Library component">

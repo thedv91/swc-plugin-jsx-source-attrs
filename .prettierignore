@@ -13,8 +13,3 @@ pnpm-lock.yaml
 # documentation change in a diff of realigned pipes; run it by hand on a file
 # if you want it.
 *.md
-
-# The example app is evidence as much as code: README quotes line numbers
-# measured against these files ("a 26-line ClientPanel.tsx reported lines 37,
-# 45 and 54"), and reflowing them silently invalidates the quote.
-examples/

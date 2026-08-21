@@ -5,8 +5,9 @@ import type { NextConfig } from "next";
 // whole edit loop -- no `prepack` copy step in between.
 // Turbopack resolves this relative to the project root, and rejects an
 // absolute path outright ("server relative imports are not implemented yet").
-const plugin =
-  "../../target/wasm32-unknown-unknown/release/swc_plugin_jsx_source_attrs.wasm";
+const plugin = "../../target/wasm32-unknown-unknown/release/swc_plugin_jsx_source_attrs.wasm";
+
+import { turbopackRules } from "../../config";
 
 // Which bundler is running is not on `NextConfig`, and the `--webpack` flag
 // cannot be read back: `next dev` reloads this file in a child process, and
@@ -24,7 +25,9 @@ const nextConfig: NextConfig = {
   experimental: {
     // Next rejects this flag under webpack whether it is true or false, so it
     // has to be absent there rather than disabled.
-    ...(webpack ? {} : { turbopackRustReactCompiler: true }),
+    ...(webpack
+      ? { swcPlugins: [[plugin, { "root-dir": "examples/nextjs" }]] }
+      : { turbopackRustReactCompiler: true }),
     // No `root-dir`, which is also why the two bundlers report different paths
     // here: Turbopack runs from the workspace root it detects (the repo root,
     // not this directory) and reports `examples/nextjs/src/app/page.tsx`, while
@@ -36,7 +39,16 @@ const nextConfig: NextConfig = {
     // handler resolves the attribute against `process.cwd()`, so anything else
     // (Turbopack's default here is the repo root) sends the editor to a path that
     // does not exist.
-    swcPlugins: [[plugin, { "root-dir": "examples/nextjs" }]],
+  },
+  turbopack: {
+    rules: turbopackRules({
+      enabled: process.env.NODE_ENV === "development" && !webpack,
+      position: true,
+      "source-path-attr": "data-tsd-source",
+      ignore: {
+        components: ["Trans"],
+      },
+    }),
   },
   // The devtools client fetches `/__tsd/open-source?source=path:line:column` on
   // click. Nothing serves that under Next -- but the dev overlay's own
@@ -61,8 +73,7 @@ const nextConfig: NextConfig = {
             value: "(?<file>.+):(?<line>\\d+):(?<column>\\d+)",
           },
         ],
-        destination:
-          "/__nextjs_launch-editor?file=:file&line1=:line&column1=:column",
+        destination: "/__nextjs_launch-editor?file=:file&line1=:line&column1=:column",
       },
       // Positionless fallback, for `position: false` and for Client Components
       // under the React Compiler -- both emit the bare path. Must come second:
