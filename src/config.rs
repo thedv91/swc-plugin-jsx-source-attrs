@@ -18,7 +18,7 @@ pub struct IgnoreConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginConfig {
-    /// Attribute name to emit (default: `data-source-path`)
+    /// Attribute name to emit (default: `data-tsd-source`)
     #[serde(default, rename = "source-path-attr")]
     pub source_path_attr: Option<String>,
 
@@ -68,7 +68,11 @@ impl PluginConfig {
     pub fn source_path_attr_name(&self) -> &str {
         match self.source_path_attr {
             Some(ref custom) => custom,
-            None => "data-source-path",
+            // The name the TanStack Devtools source inspector reads. It is
+            // hardcoded there, so defaulting to anything else makes the empty
+            // config `{}` useless with the one consumer that reads this
+            // attribute off the shelf.
+            None => "data-tsd-source",
         }
     }
 }

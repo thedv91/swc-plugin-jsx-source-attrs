@@ -23,12 +23,12 @@ caches the plugin per process, so a hot reload alone will not pick up a new
 `.wasm`.
 
 The page on `/` covers one case per section: nested host elements, a fragment,
-a component that spreads its props, a hand-written `data-source-path`, and a
+a component that spreads its props, a hand-written `data-tsd-source`, and a
 component imported from `node_modules`. Open devtools and read the attribute,
 or check the prerendered markup without a browser:
 
 ```bash
-pnpm --filter nextjs build && rg -o 'data-source-path="[^"]*"' examples/nextjs/.next/server/app/index.html | sort -u
+pnpm --filter nextjs build && rg -o 'data-tsd-source="[^"]*"' examples/nextjs/.next/server/app/index.html | sort -u
 ```
 
 Swap in `build:webpack` for the same check under webpack. The paths differ

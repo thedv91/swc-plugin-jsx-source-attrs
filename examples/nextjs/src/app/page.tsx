@@ -9,7 +9,7 @@ export default function Home() {
       <h1 className="text-2xl font-bold">swc-plugin-jsx-source-attrs</h1>
       <p>
         Inspect any element below: every one written in this project carries a{" "}
-        <code>data-source-path</code> attribute.
+        <code>data-tsd-source</code> attribute.
       </p>
 
       <Card title="Nested host elements">
@@ -42,7 +42,7 @@ export default function Home() {
       </Card>
 
       <Card title="Hand-written attribute">
-        <em data-source-path="written-by-hand">an existing value is preserved</em>
+        <em data-tsd-source="written-by-hand">an existing value is preserved</em>
       </Card>
 
       <Card title="Library component">

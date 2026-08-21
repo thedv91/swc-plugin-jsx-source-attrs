@@ -1,12 +1,16 @@
-# SWC Plugin: JSX Source Attrs [![npm badge](https://img.shields.io/npm/v/swc-plugin-jsx-source-attrs)](https://www.npmjs.com/package/swc-plugin-jsx-source-attrs)
+# SWC Plugin: JSX Source Attrs
+
+[![npm](https://img.shields.io/npm/v/swc-plugin-jsx-source-attrs)](https://www.npmjs.com/package/swc-plugin-jsx-source-attrs)
+[![CI](https://github.com/thedv91/swc-plugin-jsx-source-attrs/actions/workflows/ci.yml/badge.svg)](https://github.com/thedv91/swc-plugin-jsx-source-attrs/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/swc-plugin-jsx-source-attrs)](LICENSE)
 
 An SWC plugin that stamps every JSX element with the file, line and column it was written at.
 
 ```jsx
-<nav data-source-path="src/components/GameModeNav.tsx:3:5">
-  <ul data-source-path="src/components/GameModeNav.tsx:4:7">
-    <li data-source-path="src/components/GameModeNav.tsx:5:9">
-      <Item data-source-path="src/components/GameModeNav.tsx:5:13" />
+<nav data-tsd-source="src/components/GameModeNav.tsx:3:5">
+  <ul data-tsd-source="src/components/GameModeNav.tsx:4:7">
+    <li data-tsd-source="src/components/GameModeNav.tsx:5:9">
+      <Item data-tsd-source="src/components/GameModeNav.tsx:5:13" />
     </li>
   </ul>
 </nav>
@@ -16,13 +20,30 @@ That is the whole plugin. One attribute, one job: given an element in the browse
 
 This is a port of the `data-tsd-source` injection in [@tanstack/devtools](https://tanstack.com/devtools), which does the same thing for Vite. If you already build with Vite you do not need this; it exists for toolchains built on SWC (Next.js, Rspack, Nx, plain `@swc/core`) — including as the source of the attribute TanStack's own devtools read, see [TanStack Devtools](#tanstack-devtools).
 
+## Contents
+
+- [Installation](#installation) · [Usage](#usage) · [Compatibility](#compatibility) · [Options](#options)
+- [Monorepos](#monorepos) · [Project files only](#project-files-only) · [What else is skipped](#what-else-is-skipped)
+- [TanStack Devtools](#tanstack-devtools) — click-to-source under Next.js
+- [Known limitation: the React Compiler](#known-limitation-the-react-compiler)
+
 ## Installation
 
 ```bash
 npm install --save-dev swc-plugin-jsx-source-attrs
 ```
 
+```bash
+pnpm add -D swc-plugin-jsx-source-attrs
+```
+
+```bash
+yarn add -D swc-plugin-jsx-source-attrs
+```
+
 ## Usage
+
+Every SWC host takes the plugin the same way — a `[name, options]` pair under `jsc.experimental.plugins`. In `.swcrc`, and anywhere else `@swc/core` is driven directly:
 
 ```json
 {
@@ -51,13 +72,54 @@ const nextConfig: NextConfig = {
 
 One config, both bundlers: Turbopack and webpack (`next dev --webpack`, `next build --webpack`, and every Next.js version from before Turbopack was the default) both run SWC plugins, and both were checked against a running app in [`examples/nextjs`](examples/nextjs). What differs between them is the path each one reports — see [Monorepos](#monorepos) — and what the React Compiler does to positions, which is the [known limitation](#known-limitation-the-react-compiler) below.
 
+### Rspack
+
+`builtin:swc-loader` takes the same pair, on whichever rule handles your JSX:
+
+```js
+// rspack.config.js
+export default {
+  module: {
+    rules: [
+      {
+        test: /\.[jt]sx$/,
+        use: {
+          loader: "builtin:swc-loader",
+          options: {
+            jsc: {
+              experimental: {
+                plugins: [["swc-plugin-jsx-source-attrs", {}]],
+              },
+            },
+          },
+        },
+      },
+    ],
+  },
+};
+```
+
+Rspack caches compiled wasm plugins under `.swc/` in the project; `jsc.experimental.cacheRoot` moves it.
+
+## Compatibility
+
+| | |
+| --- | --- |
+| Host ABI | `swc_core` **71.0.1** — as embedded in `@swc/core` 1.15.43 (what the e2e suite runs) and `@rspack/core` 2.1.x |
+| Verified against | Next.js 16.3.1, React 19.2 ([`examples/nextjs`](examples/nextjs)) |
+| Output | `wasm32-unknown-unknown`, no runtime dependency |
+
+An SWC wasm plugin is compiled against one `swc_core` ABI and the host rejects any other, so this pin is the one compatibility fact worth checking first. The failure is loud but unhelpful — the host reports that the plugin failed to load, without naming a version — so if the plugin will not start under a bundler that recently updated, compare its `swc_core` against the pin above rather than reading the error.
+
+Next.js is the toolchain checked end to end against a running app; the Rspack config above follows Rspack's documented `builtin:swc-loader` shape and the ABI pin exists to match it, but no example app exercises it here.
+
 ## Options
 
 Every option has a default, so `{}` is a working config. Spelled out, that empty object is:
 
 ```jsonc
 {
-  "source-path-attr": "data-source-path",
+  "source-path-attr": "data-tsd-source",
   "position": true,
   "ignore": {
     "files": [],
@@ -71,7 +133,7 @@ Every option has a default, so `{}` is a working config. Spelled out, that empty
 
 Options are read independently, so a config only needs the ones it changes. Two ways a config can quietly do nothing, neither of which fails the build: a key the plugin does not know — `sourcePathAttr` instead of `source-path-attr` — is ignored and that option keeps its default, and a known key given the wrong type — `"position": "false"` — discards the *whole* config back to the defaults above. If an option looks like it is being ignored, read the emitted attribute rather than trusting the config.
 
-- **`source-path-attr`** (string, default: `data-source-path`): Attribute name to emit. Use `data-tsd-source` to match TanStack Devtools exactly.
+- **`source-path-attr`** (string, default: `data-tsd-source`): Attribute name to emit. The default is the name the TanStack Devtools source inspector reads, so `{}` works with it unchanged — see [TanStack Devtools](#tanstack-devtools). Set this only for a consumer that reads some other name.
 
 - **`position`** (boolean, default: `true`): Append the element's own `:line:column`. Columns are counted from 1, the way an editor reports them. Set to `false` to emit the file path alone.
 
@@ -108,7 +170,7 @@ Options are read independently, so a config only needs the ones it changes. Two 
 
 Which form you get is decided by the working directory the build runs in, not by where the file lives — so set a root explicitly when the two disagree:
 
-| Build runs in | `root-dir` | `data-source-path` |
+| Build runs in | `root-dir` | `data-tsd-source` |
 | --- | --- | --- |
 | `apps/web` | *(unset)* | `src/components/Button.tsx:3:5` |
 | repo root | *(unset)* | `apps/web/src/components/Button.tsx:3:5` |
@@ -136,7 +198,7 @@ import {Button} from "some-lib";
 
 function App() {
   return <Button label="hi" />;
-  //     ^ data-source-path="src/App.jsx:4:10"
+  //     ^ data-tsd-source="src/App.jsx:4:10"
 }
 ```
 
@@ -167,7 +229,7 @@ The devtools' [source inspector](https://tanstack.com/devtools/latest/docs/sourc
 npm install --save-dev @tanstack/react-devtools swc-plugin-jsx-source-attrs
 ```
 
-**2.** `next.config.ts` — the attribute name, and a redirect for the endpoint the devtools call on click:
+**2.** `next.config.ts` — the plugin, and a redirect for the endpoint the devtools call on click. No `source-path-attr`: the default is already the `data-tsd-source` the inspector reads.
 
 ```ts
 import type { NextConfig } from "next";
@@ -178,7 +240,6 @@ const nextConfig: NextConfig = {
       [
         "swc-plugin-jsx-source-attrs",
         {
-          "source-path-attr": "data-tsd-source",
           // Only needed when `next dev` does not run from the directory you
           // want paths relative to -- a monorepo package, typically.
           // "root-dir": "apps/web",
@@ -272,7 +333,7 @@ Each of those pieces fails differently if it is missing, and none of them fails 
 
 ### The attribute name
 
-`data-tsd-source` is hardcoded in the inspector, not configurable on their side. Leave the default `data-source-path` and nothing highlights — which reads as a dead hotkey, because the hotkey has no other visible effect. The inspector also does not walk up the tree: it reads the attribute off the topmost element under the cursor and gives up if it is absent, so anything this plugin skips (see [What else is skipped](#what-else-is-skipped)) is a hole in the overlay rather than a hit on its parent.
+`data-tsd-source` is hardcoded in the inspector, not configurable on their side — which is why it is this plugin's default. Point `source-path-attr` at any other name and nothing highlights, and the failure reads as a dead hotkey, because the hotkey has no other visible effect. The inspector also does not walk up the tree: it reads the attribute off the topmost element under the cursor and gives up if it is absent, so anything this plugin skips (see [What else is skipped](#what-else-is-skipped)) is a hole in the overlay rather than a hit on its parent.
 
 `root-dir` has to name the directory `next dev` runs in, because a relative path in the attribute is resolved against the project root when the file is opened. Under Turbopack the default root is the repo, so a monorepo package needs this set or the editor is sent to `<cwd>/apps/web/apps/web/…`. See [Monorepos](#monorepos).
 
@@ -339,7 +400,7 @@ const nextConfig: NextConfig = {
 
 Verified on Next.js 16.3.1 in [`examples/nextjs`](examples/nextjs) — positions come back, and are correct:
 
-| | `data-source-path` |
+| | `data-tsd-source` |
 | --- | --- |
 | Server Components | full position, e.g. `src/app/page.tsx:7:5` for the `<main>` on line 7 |
 | Client Components | bare path, no position — **but identical on server and client**, so nothing mismatches |
@@ -356,6 +417,16 @@ Without the React Compiler, webpack needs no workaround at all — server and cl
 
 TanStack Devtools sidesteps all of this: as a Vite plugin with `enforce: 'pre'`, it transforms the original source before anything else runs.
 
+## Contributing
+
+Bug reports and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers the build loop, the fixture tests, and the handful of wasm-sandbox constraints that make this plugin unusual to work on.
+
+Release notes live in [CHANGELOG.md](CHANGELOG.md).
+
 ## Credits
 
 The behaviour is modelled on `injectSource` from [@tanstack/devtools](https://github.com/TanStack/devtools).
+
+## License
+
+[MIT](LICENSE)

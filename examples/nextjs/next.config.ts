@@ -30,18 +30,13 @@ const nextConfig: NextConfig = {
     // not this directory) and reports `examples/nextjs/src/app/page.tsx`, while
     // webpack runs from this directory and reports `src/app/page.tsx`. Setting
     // `root-dir: "examples/nextjs"` gives the shorter form under both.
-    // `data-tsd-source` is the name the TanStack Devtools source inspector
-    // reads; it is hardcoded there, not configurable on their side.
+    // No `source-path-attr` either: the default is already `data-tsd-source`,
+    // the name the TanStack Devtools source inspector reads.
     // `root-dir` has to name the directory the dev server runs in: the open-source
     // handler resolves the attribute against `process.cwd()`, so anything else
     // (Turbopack's default here is the repo root) sends the editor to a path that
     // does not exist.
-    swcPlugins: [
-      [
-        plugin,
-        { "source-path-attr": "data-tsd-source", "root-dir": "examples/nextjs" },
-      ],
-    ],
+    swcPlugins: [[plugin, { "root-dir": "examples/nextjs" }]],
   },
   // The devtools client fetches `/__tsd/open-source?source=path:line:column` on
   // click. Nothing serves that under Next -- but the dev overlay's own

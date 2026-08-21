@@ -27,7 +27,7 @@ test("annotates every element with file, line and column", () => {
     assert.match(
       code,
       new RegExp(
-        `createElement\\(${tag}, \\{\\s+"data-source-path": "tests/e2e/Button\\.jsx:${position}"\\s+\\}`
+        `createElement\\(${tag}, \\{\\s+"data-tsd-source": "tests/e2e/Button\\.jsx:${position}"\\s+\\}`
       )
     );
   }
@@ -36,15 +36,17 @@ test("annotates every element with file, line and column", () => {
 test("drops the position when asked", () => {
   const code = transform(NESTED, {position: false});
 
-  assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx"/);
+  assert.match(code, /"data-tsd-source": "tests\/e2e\/Button\.jsx"/);
   assert.doesNotMatch(code, /Button\.jsx:\d/);
 });
 
 test("uses a custom attribute name", () => {
-  const code = transform(NESTED, {"source-path-attr": "data-tsd-source"});
+  // Any name but `data-tsd-source`, which is the default and would pass here
+  // whether or not the option was read.
+  const code = transform(NESTED, {"source-path-attr": "data-source-path"});
 
-  assert.match(code, /"data-tsd-source": "tests\/e2e\/Button\.jsx:3:5"/);
-  assert.doesNotMatch(code, /data-source-path/);
+  assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx:3:5"/);
+  assert.doesNotMatch(code, /data-tsd-source/);
 });
 
 test("takes a camelCase attribute name as written", () => {
@@ -66,8 +68,8 @@ function Shell() {
 }`);
 
   assert.doesNotMatch(code, /Fragment, \{/);
-  assert.match(code, /"span", \{\s+"data-source-path"/);
-  assert.match(code, /"em", \{\s+"data-source-path"/);
+  assert.match(code, /"span", \{\s+"data-tsd-source"/);
+  assert.match(code, /"em", \{\s+"data-tsd-source"/);
 });
 
 test("lets a forwarded props spread win over the element's own value", () => {
@@ -87,11 +89,11 @@ function Unrelated() {
   // caller's forwarded value overwrites it at runtime. Getting this through
   // ordering rather than through code inspection is what keeps server and
   // client agreeing under Turbopack.
-  assert.equal((code.match(/data-source-path/g) ?? []).length, 3);
+  assert.equal((code.match(/data-tsd-source/g) ?? []).length, 3);
   for (const spread of ["props", "rest", "somethingElse"]) {
     assert.match(
       code,
-      new RegExp(`"data-source-path": "[^"]*"[\\s\\S]{0,80}?${spread}`)
+      new RegExp(`"data-tsd-source": "[^"]*"[\\s\\S]{0,80}?${spread}`)
     );
   }
 });
@@ -99,24 +101,24 @@ function Unrelated() {
 test("does not overwrite an attribute already on the element", () => {
   const code = transform(`function Shell() {
   return (
-    <div data-source-path="hand-written">
+    <div data-tsd-source="hand-written">
       <span>sibling</span>
     </div>
   );
 }`);
 
-  assert.match(code, /"data-source-path": "hand-written"/);
-  assert.equal((code.match(/data-source-path/g) ?? []).length, 2);
+  assert.match(code, /"data-tsd-source": "hand-written"/);
+  assert.equal((code.match(/data-tsd-source/g) ?? []).length, 2);
   assert.match(
     code,
-    /"span", \{\s+"data-source-path": "tests\/e2e\/Button\.jsx:4:7"/
+    /"span", \{\s+"data-tsd-source": "tests\/e2e\/Button\.jsx:4:7"/
   );
 });
 
 test("defaults the root to the working directory", () => {
   const code = transform(`function Button() { return <div />; }`);
 
-  assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx:1:28"/);
+  assert.match(code, /"data-tsd-source": "tests\/e2e\/Button\.jsx:1:28"/);
 });
 
 test("anchors a relative root-dir to the working directory", () => {
@@ -129,7 +131,7 @@ test("anchors a relative root-dir to the working directory", () => {
 
   assert.match(
     code,
-    new RegExp(`"data-source-path": "${enclosing}/tests/e2e/Button\\.jsx:1:28"`)
+    new RegExp(`"data-tsd-source": "${enclosing}/tests/e2e/Button\\.jsx:1:28"`)
   );
 });
 
@@ -143,7 +145,7 @@ test("reads a relative root-dir naming the working directory as that directory",
     "root-dir": here,
   });
 
-  assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx:1:28"/);
+  assert.match(code, /"data-tsd-source": "tests\/e2e\/Button\.jsx:1:28"/);
 });
 
 test("takes an absolute root-dir verbatim", () => {
@@ -151,7 +153,7 @@ test("takes an absolute root-dir verbatim", () => {
     "root-dir": process.cwd(),
   });
 
-  assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx:1:28"/);
+  assert.match(code, /"data-tsd-source": "tests\/e2e\/Button\.jsx:1:28"/);
 });
 
 test("falls back to the bare path under the React Compiler", () => {
@@ -160,9 +162,9 @@ test("falls back to the bare path under the React Compiler", () => {
   // The compiler rebuilds the JSX tree with no source spans, so there is no
   // position left to report. Asking the host to resolve those spans would
   // panic the build, so the plugin emits the path alone.
-  assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx"/);
+  assert.match(code, /"data-tsd-source": "tests\/e2e\/Button\.jsx"/);
   assert.doesNotMatch(code, /Button\.jsx:\d/);
-  assert.equal((code.match(/data-source-path/g) ?? []).length, 4);
+  assert.equal((code.match(/data-tsd-source/g) ?? []).length, 4);
 });
 
 test("annotates nothing when the file sits outside root-dir", () => {
@@ -171,7 +173,7 @@ test("annotates nothing when the file sits outside root-dir", () => {
   });
 
   // Not project source, so there is no project-relative position to report.
-  assert.doesNotMatch(code, /data-source-path/);
+  assert.doesNotMatch(code, /data-tsd-source/);
 });
 
 test("annotates nothing inside a dependency", () => {
@@ -187,7 +189,7 @@ export function Card({title}) {
     {filename: "node_modules/some-lib/dist/index.js"}
   );
 
-  assert.doesNotMatch(code, /data-source-path/);
+  assert.doesNotMatch(code, /data-tsd-source/);
 });
 
 test("annotates a library component at the call site in project code", () => {
@@ -199,7 +201,7 @@ function App() {
 
   // What you want when you click a library component is the line in your own
   // code that rendered it — which is exactly where this element sits.
-  assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx:4:10"/);
+  assert.match(code, /"data-tsd-source": "tests\/e2e\/Button\.jsx:4:10"/);
 });
 
 test("handles Turbopack's virtual project root", () => {
@@ -210,7 +212,7 @@ test("handles Turbopack's virtual project root", () => {
     filename: "[project]/src/components/Card.tsx",
   });
 
-  assert.match(code, /"data-source-path": "src\/components\/Card\.tsx:1:26"/);
+  assert.match(code, /"data-tsd-source": "src\/components\/Card\.tsx:1:26"/);
 });
 
 test("strips a relative root-dir from a project-relative path", () => {
@@ -222,7 +224,7 @@ test("strips a relative root-dir from a project-relative path", () => {
     filename: "apps/web/src/components/Card.tsx",
   });
 
-  assert.match(code, /"data-source-path": "src\/components\/Card\.tsx:1:26"/);
+  assert.match(code, /"data-tsd-source": "src\/components\/Card\.tsx:1:26"/);
 });
 
 test("strips a relative root-dir from a virtual path", () => {
@@ -236,7 +238,7 @@ test("strips a relative root-dir from a virtual path", () => {
     filename: "[project]/apps/web/src/components/Card.tsx",
   });
 
-  assert.match(code, /"data-source-path": "src\/components\/Card\.tsx:1:26"/);
+  assert.match(code, /"data-tsd-source": "src\/components\/Card\.tsx:1:26"/);
 
   // And a sibling package is outside that root, so it is not project source
   const sibling = transform(`function Card() { return <article />; }`, {
@@ -245,7 +247,7 @@ test("strips a relative root-dir from a virtual path", () => {
     filename: "[project]/packages/ui/src/Card.tsx",
   });
 
-  assert.doesNotMatch(sibling, /data-source-path/);
+  assert.doesNotMatch(sibling, /data-tsd-source/);
 });
 
 test("skips dependencies and bundler code behind a virtual root", () => {
@@ -256,8 +258,8 @@ test("skips dependencies and bundler code behind a virtual root", () => {
     filename: "[next]/dist/client/app.js",
   });
 
-  assert.doesNotMatch(dependency, /data-source-path/);
-  assert.doesNotMatch(bundler, /data-source-path/);
+  assert.doesNotMatch(dependency, /data-tsd-source/);
+  assert.doesNotMatch(bundler, /data-tsd-source/);
 });
 
 test("leaves an ignored file alone", () => {
@@ -265,7 +267,7 @@ test("leaves an ignored file alone", () => {
     ignore: {files: ["*.test.jsx"]},
   }, {filename: "tests/e2e/Button.test.jsx"});
 
-  assert.doesNotMatch(code, /data-source-path/);
+  assert.doesNotMatch(code, /data-tsd-source/);
 });
 
 test("leaves ignored components alone, but not their children", () => {
@@ -279,10 +281,10 @@ test("leaves ignored components alone, but not their children", () => {
   );
 }`, {ignore: {components: ["Providers", "*Lazy"]}});
 
-  assert.doesNotMatch(code, /"data-source-path": "[^"]*:3:5"/);
-  assert.doesNotMatch(code, /"data-source-path": "[^"]*:4:7"/);
+  assert.doesNotMatch(code, /"data-tsd-source": "[^"]*:3:5"/);
+  assert.doesNotMatch(code, /"data-tsd-source": "[^"]*:4:7"/);
   // The child of an ignored component is still project code the author wrote
-  assert.match(code, /"data-source-path": "tests\/e2e\/Button\.jsx:5:9"/);
+  assert.match(code, /"data-tsd-source": "tests\/e2e\/Button\.jsx:5:9"/);
 });
 
 test("a RegExp in ignore cannot survive the JSON boundary", () => {
@@ -292,5 +294,5 @@ test("a RegExp in ignore cannot survive the JSON boundary", () => {
     ignore: {components: [/.*Lazy$/]},
   });
 
-  assert.match(code, /data-source-path/);
+  assert.match(code, /data-tsd-source/);
 });

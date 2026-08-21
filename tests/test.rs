@@ -395,20 +395,22 @@ fn test_config_parsing() {
     // Position is on by default, and both entry points must agree on that
     let default_config = PluginConfig::default();
     assert!(default_config.position);
-    assert_eq!(default_config.source_path_attr_name(), "data-source-path");
+    assert_eq!(default_config.source_path_attr_name(), "data-tsd-source");
 
     let empty: PluginConfig = serde_json::from_str("{}").unwrap();
     assert!(empty.position);
 
     let configured: PluginConfig = serde_json::from_str(
         r#"{
-        "source-path-attr": "data-tsd-source",
+        "source-path-attr": "data-source-path",
         "root-dir": "../..",
         "position": false
     }"#,
     )
     .unwrap();
-    assert_eq!(configured.source_path_attr_name(), "data-tsd-source");
+    // Deliberately not `data-tsd-source`: that is the default, so it would pass
+    // whether or not the option was read at all.
+    assert_eq!(configured.source_path_attr_name(), "data-source-path");
     assert_eq!(configured.root_dir, Some("../..".to_string()));
     assert!(!configured.position);
 
@@ -424,7 +426,7 @@ fn test_config_parsing() {
     // An unknown key is ignored rather than failing the whole config, so a
     // dropped option cannot take a project's builds down with it
     let unknown: PluginConfig = serde_json::from_str(r#"{ "native": true }"#).unwrap();
-    assert_eq!(unknown.source_path_attr_name(), "data-source-path");
+    assert_eq!(unknown.source_path_attr_name(), "data-tsd-source");
 }
 
 #[testing::fixture("tests/fixture/*/input.jsx")]

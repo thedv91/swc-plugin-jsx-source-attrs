@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.5.0 (2026-08-21)
+
+### Changed
+
+- **The default `source-path-attr` is now `data-tsd-source`**, not `data-source-path`. The old default matched no consumer: `data-tsd-source` is hardcoded in the [TanStack Devtools source inspector](https://tanstack.com/devtools/latest/docs/source-inspector), which is the one tool that reads this attribute off the shelf, so an empty config `{}` now drives it with nothing else set.
+
+  This changes emitted markup for anyone who did not set the option. To keep the old attribute:
+
+  ```jsonc
+  ["swc-plugin-jsx-source-attrs", { "source-path-attr": "data-source-path" }]
+  ```
+
+  Released as a minor rather than a major: the package has few installs at this point, and the cost of the rename is one line of config against a default that worked with nothing.
+
+  Anything that selects on the attribute has to move with it — CSS, test selectors, `querySelector` calls, and any devtools overlay reading a custom name.
+
 ## 1.4.0 (2026-08-20)
 
 ### Added

@@ -1,6 +1,6 @@
 function Shell() {
   return (
-    <div data-source-path="hand-written/Value.jsx:1:1">
+    <div data-tsd-source="hand-written/Value.jsx:1:1">
       <span>only the untouched sibling gets one</span>
     </div>
   );
